@@ -1,0 +1,64 @@
+###########33 ARQUIVOS QUE PRECISO PARA SKILL DA ALEXA 3############
+
+minha_voz_styletts2/
+│
+├── model/
+│   ├── best_model.pth
+│   ├── config.yml
+│   └── vocoder/checkpoints necessários
+│
+├── data_reference/
+│   ├── referencia_voz.wav
+│   ├── train_list.txt
+│   ├── val_list.txt
+│   └── metadata.csv
+│
+├── tokenizer/
+│   └── arquivos de tokenizer/fonemizador, se usados
+│
+├── inference/
+│   ├── inference.py
+│   ├── requirements.txt
+│   └── exemplo_uso.py
+│
+├── docs/
+│   ├── parametros_treinamento.txt
+│   ├── dataset_usado.txt
+│   └── observacoes.txt
+│
+└── outputs/
+    └── amostras_geradas.wav
+
+
+
+Arquivos que eu considero indispensáveis
+
+Para não correr risco, guarde estes:
+
+.pth do modelo final
+config.yml ou config_ft.yml
+train_list.txt
+val_list.txt
+metadata.csv
+áudios .wav originais limpos
+áudio de referência da voz
+requirements.txt
+script de inferência usado para testar
+versão do repositório/código usado no treinamento
+
+
+PASTA ZIP
+
+best_model.pth
+config.yml
+config_ft.yml
+train_list.txt
+val_list.txt
+metadata.csv
+reference.wav
+requirements.txt
+inference.py
+README_COMO_USAR.txt
+amostras_geradas/
+audios_originais_limpos/
+logs/

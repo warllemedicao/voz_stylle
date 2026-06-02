@@ -1,0 +1,85 @@
+
+repo_url: "https://github.com/warllemedicao/Voz_styllett2.git"
+repo_dir: "/kaggle/working/Super_voz"
+project_subdir: "super_Voz"
+
+styletts2_repo: "https://github.com/yl4579/StyleTTS2.git"
+styletts2_dir: "/kaggle/working/StyleTTS2"
+output_dir: "/kaggle/working/super_Voz_outputs"
+r2_sync_interval_seconds: 600
+
+# Persistencia opcional via TeraBox.
+# Recomendado: crie um Kaggle Secret chamado TERABOX_NDUS em vez de gravar cookie aqui.
+# Como nao existe CLI oficial estavel do TeraBox, configure os comandos conforme a ferramenta escolhida.
+terabox:
+  enabled: false
+  ndus_env: "TERABOX_NDUS"
+  cookie_ndus: ""
+  cli_path: "/kaggle/working/terabox-cli"
+  remote_styletts2_dir: "/StyleTTS2"
+  remote_checkpoint_dir: "/StyleTTS2/Models/super_Voz"
+  sync_interval_seconds: 600
+  install_commands: []
+  login_command:
+    - "{cli}"
+    - "login"
+    - "--ndus"
+    - "{ndus}"
+  download_command:
+    - "{cli}"
+    - "download"
+    - "{remote_dir}"
+    - "{local_dir}"
+  upload_command:
+    - "{cli}"
+    - "upload"
+    - "{local_dir}"
+    - "{remote_dir}"
+
+# Cloudflare R2 e usado apenas para baixar audios brutos no Kaggle.
+# No notebook Kaggle, upload/sync para R2 e bloqueado na config runtime para evitar taxas.
+cloudflare_r2:
+  endpoint_url: "https://dcd864c77e805b2f1488a63f44732e08.r2.cloudflarestorage.com"
+  access_key_id: "a9692b69ee0785f2c3ffd4bc66b56f88"
+  secret_access_key: "ed3f7dd6dcdec6041fd603a1bb57e67775f3f0ed92752a9b295f002f113241c2"
+  bucket_name: "super-voz"
+  raw_audio_prefix: "super_voz/Audios_Brutos/"
+
+# Caminhos locais no Kaggle (onde os dados serão colocados após download do R2)
+raw_audio_candidates:
+  - "Audios_brutos"
+  - "/kaggle/input/super-voz/Audios_brutos"
+  - "/kaggle/input/super-voz/Audios_Brutos"
+
+styletts2_restore_candidates:
+  - "/kaggle/input/styllet2"
+  - "/kaggle/input/styletts2"
+  - "/kaggle/input/terabox/StyleTTS2"
+  - "/kaggle/input/super-voz/StyleTTS2"
+
+# processed_audio_candidates: # DESATIVADO PARA GARANTIR LIMPEZA COMPLETA
+#   - "Audios_processados"
+#   - "/kaggle/input/super-voz/Audios_processados"
+
+speaker: "0"
+sample_rate: 24000
+val_ratio: 0.05
+phonemize: true
+phonemizer_language: "pt-br"
+
+# Configuração otimizada rigorosa para Kaggle P100/T4 (evitar OOM)
+epochs: 50
+batch_size: 2
+max_len: 128
+save_freq: 1
+log_interval: 10
+
+joint_epoch: 999
+diff_epoch: 10
+
+batch_percentage: 0.0625
+slm_min_len: 100
+slm_max_len: 150
+
+max_audio_seconds: 10
+max_text_chars: 200
