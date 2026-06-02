@@ -408,6 +408,9 @@ def get_terabox_ndus(tb_cfg: dict) -> str:
 def render_terabox_command(template: list[str], tb_cfg: dict, local_dir: Path, remote_dir: str, ndus: str) -> list[str]:
     values = {
         "cli": tb_cfg.get("cli_path", "terabox-cli"),
+        "python": sys.executable,
+        "script_dir": str(Path(__file__).resolve().parent),
+        "kaggle_dir": str(Path(__file__).resolve().parents[1]),
         "local_dir": str(local_dir),
         "remote_dir": remote_dir,
         "ndus": ndus,
@@ -416,6 +419,8 @@ def render_terabox_command(template: list[str], tb_cfg: dict, local_dir: Path, r
 
 
 def run_terabox_command(template: list[str], tb_cfg: dict, local_dir: Path, remote_dir: str, ndus: str, check=False) -> bool:
+    if not template:
+        return False
     cmd = render_terabox_command(template, tb_cfg, local_dir, remote_dir, ndus)
     display_cmd = ["***" if arg == ndus and ndus else arg for arg in cmd]
     try:
@@ -434,6 +439,15 @@ def setup_terabox(cfg: dict) -> dict | None:
     ndus = get_terabox_ndus(tb_cfg)
     if not ndus:
         print("[TeraBox][AVISO] terabox.enabled=true, mas TERABOX_NDUS nao foi encontrado. Sincronizacao TeraBox desativada.")
+        return None
+
+    missing_env = [name for name in tb_cfg.get("required_env", []) or [] if not os.environ.get(str(name))]
+    if missing_env:
+        print(
+            "[TeraBox][AVISO] Secrets obrigatorios ausentes: "
+            + ", ".join(map(str, missing_env))
+            + ". Sincronizacao TeraBox desativada."
+        )
         return None
 
     for install_cmd in tb_cfg.get("install_commands", []) or []:
@@ -503,7 +517,10 @@ def terabox_download_styletts2(tb_cfg: dict | None, style_dir: Path) -> None:
     ndus = get_terabox_ndus(tb_cfg)
     remote_dir = tb_cfg.get("remote_styletts2_dir", "/StyleTTS2")
     local_dir = Path(tb_cfg.get("local_styletts2_dir", str(style_dir)))
-    command = tb_cfg.get("download_command", ["{cli}", "download", "{remote_dir}", "{local_dir}"])
+    command = tb_cfg.get("download_command", [])
+    if not command:
+        print("[TeraBox] Download remoto nao configurado; use Kaggle Input para restaurar checkpoints.")
+        return
 
     print(f"[TeraBox] Tentando baixar estado remoto {remote_dir} -> {local_dir}")
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -785,17 +802,21 @@ def main() -> int:
 
     import yaml
 
-    project_dir = Path("/kaggle/working/Super_voz").resolve()
-    if not project_dir.exists():
-        project_dir = Path(__file__).resolve().parents[1]
+    code_dir = Path(__file__).resolve().parents[1]
+    repo_dir = Path("/kaggle/working/Super_voz").resolve()
+    if not repo_dir.exists():
+        repo_dir = code_dir
 
-    config_path = project_dir / args.config
+    config_path = code_dir / args.config
     if not config_path.exists():
-        # Fallback para o diretório atual do script
-        config_path = Path(__file__).parent.parent / args.config
+        config_path = Path(args.config).resolve()
 
     with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+
+    project_dir = code_dir
+    data_root = Path(cfg.get("repo_dir", str(repo_dir))).resolve()
+    data_root.mkdir(parents=True, exist_ok=True)
 
     # Configuração de memória
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -819,8 +840,8 @@ def main() -> int:
     install_dependencies(style_dir)
     
     # Preparar audios locais
-    local_raw = project_dir / "Audios_brutos"
-    local_processed = project_dir / "Audios_processados"
+    local_raw = data_root / "Audios_brutos"
+    local_processed = data_root / "Audios_processados"
     local_raw.mkdir(parents=True, exist_ok=True)
     local_processed.mkdir(parents=True, exist_ok=True)
 
@@ -840,7 +861,11 @@ def main() -> int:
 
     if count_files(local_raw, allowed=lambda p: p.suffix.lower() in AUDIO_EXTS) == 0:
         print("[INFO] Verificando candidatos locais/Kaggle Input para audios brutos...")
-        raw_candidates = cfg.get("raw_audio_candidates", [])
+        raw_candidates = [
+            str(data_root / "Audios_brutos"),
+            str(project_dir / "Audios_brutos"),
+            *(cfg.get("raw_audio_candidates", []) or []),
+        ]
         raw_drive = first_existing(raw_candidates)
 
         if raw_drive:

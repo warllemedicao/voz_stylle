@@ -1,0 +1,191 @@
+# Kaggle Voz
+
+Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivos exclusivos do fluxo Kaggle para evitar conflito com Colab/local.
+
+## Arquivos principais
+
+- `run_kaggle_styletts2.ipynb`: notebook one-click para Kaggle.
+- `styletts2_kaggle_config.yml`: configuracao base do pipeline Kaggle.
+- `scripts/run_kaggle_styletts2.py`: runner real do treino StyleTTS2 no Kaggle.
+- `scripts/prepare_styletts2_dataset.py`: prepara `Audios_processados` para o formato StyleTTS2.
+- `scripts/terabox_uploadercli_sync.py`: wrapper de upload TeraBox via ferramenta comunitaria.
+- `limpeza_ia.py`: limpeza/transcricao dos audios brutos antes do treino.
+- `run_kaggle_oneclick.py`: bootstrap alternativo simples.
+
+## Fluxo do notebook
+
+1. Clona ou atualiza `https://github.com/warllemedicao/Voz_styllett2.git` em `/kaggle/working/Super_voz`.
+2. Localiza `run_kaggle_styletts2.py` dentro de `super_Voz/kaglle/scripts`.
+3. Entra em `/kaggle/working/Super_voz/super_Voz/kaglle`.
+4. Gera `styletts2_kaggle_sem_cloudflare.yml`, mantendo download R2 permitido e bloqueando upload R2.
+5. Executa:
+
+```bash
+python -u scripts/run_kaggle_styletts2.py --config styletts2_kaggle_sem_cloudflare.yml
+```
+
+## Correcao do erro `limpeza_ia.py`
+
+O erro observado foi:
+
+```text
+/usr/bin/python3: can't open file '/kaggle/working/Super_voz/limpeza_ia.py': [Errno 2] No such file or directory
+```
+
+A causa era o runner definir `project_dir` como `/kaggle/working/Super_voz`, enquanto o arquivo correto esta em:
+
+```text
+/kaggle/working/Super_voz/super_Voz/kaglle/limpeza_ia.py
+```
+
+O runner agora separa:
+
+- `code_dir`: pasta do codigo Kaggle, `super_Voz/kaglle`;
+- `data_root`: raiz de dados/runtime, por padrao `/kaggle/working/Super_voz`.
+
+Assim, `limpeza_ia.py` e `prepare_styletts2_dataset.py` rodam a partir da pasta correta, mas os dados continuam em:
+
+```text
+/kaggle/working/Super_voz/Audios_brutos
+/kaggle/working/Super_voz/Audios_processados
+```
+
+## Entrada de audios
+
+Ordem de busca:
+
+1. Cloudflare R2, se os secrets/configs `R2_*` estiverem disponiveis.
+2. `/kaggle/working/Super_voz/Audios_brutos`.
+3. `super_Voz/kaglle/Audios_brutos`, se existir.
+4. Kaggle Inputs configurados:
+
+```text
+/kaggle/input/super-voz/Audios_brutos
+/kaggle/input/super-voz/Audios_Brutos
+```
+
+5. Descoberta automatica em `/kaggle/input`, procurando pastas com arquivos `.wav`, `.mp3`, `.flac`, `.ogg` ou `.m4a`.
+
+## Saidas
+
+Durante o treino:
+
+```text
+/kaggle/working/StyleTTS2/Models/super_Voz
+/kaggle/working/super_Voz_styletts2_data
+/kaggle/working/super_Voz_outputs
+```
+
+Ao final, o notebook empacota:
+
+```text
+/kaggle/working/super_voz_resultados.zip
+```
+
+Se TeraBox/R2 nao estiverem configurados, esse ZIP e o fallback principal para baixar os resultados pelos outputs do Kaggle.
+
+## Cloudflare R2
+
+No Kaggle, o notebook cria uma config runtime com:
+
+```yaml
+cloudflare_r2:
+  disable_r2_uploads: true
+```
+
+Isso bloqueia upload/sync de checkpoints e resultados para R2, mas preserva o download dos audios brutos quando `raw_audio_prefix` e credenciais existem.
+
+Secrets aceitos:
+
+```text
+R2_ENDPOINT_URL
+R2_BUCKET_NAME
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_RAW_AUDIO_PREFIX
+```
+
+## TeraBox
+
+Nao ha CLI oficial estavel do TeraBox equivalente ao `rclone`. A solucao implementada usa um wrapper configuravel em:
+
+```text
+scripts/terabox_uploadercli_sync.py
+```
+
+Esse wrapper instala/usa `dnigamer/TeraboxUploaderCLI` no runtime do Kaggle e gera `secrets.json`/`settings.json` temporarios fora do Git. A ferramenta exige tokens da sessao web do TeraBox, nao apenas `ndus`.
+
+Crie estes Kaggle Secrets:
+
+```text
+TERABOX_NDUS
+TERABOX_JS_TOKEN
+TERABOX_CSRF_TOKEN
+TERABOX_BROWSER_ID
+TERABOX_NDUT_FMT
+```
+
+Com esses secrets, o notebook ativa `terabox.enabled` na config runtime. O upload periodico/final usa:
+
+```yaml
+terabox:
+  upload_command:
+    - "{python}"
+    - "{script_dir}/terabox_uploadercli_sync.py"
+    - "upload"
+    - "--local-dir"
+    - "{local_dir}"
+    - "--remote-dir"
+    - "{remote_dir}"
+    - "--tool-dir"
+    - "{cli}"
+```
+
+O destino padrao dos checkpoints e:
+
+```text
+/StyleTTS2/Models/super_Voz
+```
+
+## Restauracao de checkpoints
+
+Download direto do TeraBox nao ficou como caminho principal, porque as ferramentas comunitarias publicas sao instaveis e muitas focam upload ou links compartilhados. Para retomar treino com confiabilidade:
+
+1. Baixe/exporte a pasta `StyleTTS2` ou `Models/super_Voz` do TeraBox.
+2. Crie um Kaggle Dataset com essa pasta.
+3. Anexe o dataset ao notebook com nome como `styllet2`, `styletts2` ou `super-voz`.
+
+O runner tenta restaurar automaticamente destes caminhos:
+
+```text
+/kaggle/input/styllet2
+/kaggle/input/styletts2
+/kaggle/input/terabox/StyleTTS2
+/kaggle/input/terabox/styletts2
+/kaggle/input/super-voz/StyleTTS2
+/kaggle/input/super-voz/styletts2
+```
+
+Se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning com `load_only_params: false`. Se nao encontrar, usa o pretrained LibriTTS base.
+
+## Como obter os tokens TeraBox
+
+Os projetos publicos consultados documentam que os valores vem da sessao web logada:
+
+- `ndus`: cookie em `Application -> Cookies -> https://www.terabox.com`.
+- `jsToken`: parametro em chamadas XHR/API no painel `Network`.
+- `csrfToken`, `browserid`, `ndut_fmt`: cookies da mesma sessao.
+
+Nao grave esses valores no notebook, YAML ou Git. Use Kaggle Secrets.
+
+Referencias publicas:
+
+- `dnigamer/TeraboxUploaderCLI`: https://github.com/dnigamer/TeraboxUploaderCLI
+- `Pahadi10/terabox-upload-tool`: https://github.com/Pahadi10/terabox-upload-tool
+
+## Estado recomendado
+
+- Use R2 ou Kaggle Dataset para entrada de audios.
+- Use `/kaggle/working/super_voz_resultados.zip` como fallback obrigatorio.
+- Use TeraBox para upload periodico/final de checkpoints somente quando todos os secrets de sessao estiverem atualizados.
+- Use Kaggle Dataset para restaurar checkpoints em novas execucoes.
