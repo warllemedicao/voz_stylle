@@ -101,6 +101,23 @@ Assim, `limpeza_ia.py` e `prepare_styletts2_dataset.py` rodam a partir da pasta 
 
 Com os wrappers, mesmo que o Kaggle ainda mostre `cwd: /kaggle/working/Super_voz`, `cwd: /kaggle/working/Super_voz/super_Voz` ou execute `super_Voz/scripts/run_kaggle_styletts2.py`, a execucao deve cair no fluxo corrigido de `super_Voz/kaglle`. Se o log ainda mostrar erro abrindo `/kaggle/working/Super_voz/limpeza_ia.py`, o clone no Kaggle esta anterior a este commit; limpe `/kaggle/working/Super_voz` ou force `git reset --hard origin/main` antes de rodar.
 
+## Correcao do Resemble desligado no Kaggle
+
+O fluxo de analise/reparo correto exige que audios defeituosos sejam tratados pelo Resemble Enhance antes da padronizacao final. O notebook Kaggle estava definindo:
+
+```python
+SUPER_VOZ_ENABLE_RESEMBLE=0
+```
+
+Com isso, `limpeza_ia.py --enhancer auto` detectava o defeito, mas o `AudioEnhancer` ficava desligado; o arquivo original era copiado e apenas passava por 24 kHz/mono/PCM16/trim/normalizacao. Isso garantia formato StyleTTS2, mas nao fazia `denoise` ou `enhance` real nos audios ruins.
+
+Correcao aplicada:
+
+- `run_kaggle_styletts2.ipynb` agora define `SUPER_VOZ_ENABLE_RESEMBLE=1` por padrao.
+- O runner ja instala `resemble-enhance` quando essa variavel nao e `0`.
+- A chamada continua `limpeza_ia.py --enhancer auto`; nesse modo, audios com `hissing` ou `background_noise` usam `denoise`, e `degraded_voice` usa `enhance`.
+- Se o Resemble falhar ou a saida for reprovada pelas validacoes de duracao/RMS/pico, o pipeline preserva o original e ainda aplica a padronizacao final segura.
+
 ## Entrada de audios
 
 Ordem de busca:
