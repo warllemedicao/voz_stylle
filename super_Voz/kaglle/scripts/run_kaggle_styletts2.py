@@ -717,7 +717,6 @@ def download_pretrained(style_dir: Path) -> Path:
         repo_id="yl4579/StyleTTS2-LibriTTS",
         filename=filename,
         local_dir=str(style_dir),
-        local_dir_use_symlinks=False,
     )
     return Path(path)
 
