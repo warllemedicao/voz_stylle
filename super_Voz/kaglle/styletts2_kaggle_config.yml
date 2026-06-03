@@ -20,8 +20,15 @@ terabox:
   cli_path: "/kaggle/working/TeraboxUploaderCLI"
   remote_styletts2_dir: "/StyleTTS2"
   remote_checkpoint_dir: "/StyleTTS2/Models/super_Voz"
+  restore_share_url: "https://1024terabox.com/s/1Jh_22Dt3IqN0-70d9xAJaw"
+  restore_share_password: "voz1"
+  local_styletts2_dir: "/kaggle/working/StyleTTS2"
   sync_interval_seconds: 600
+  keep_visible_outputs: true
+  visible_output_dir: "/kaggle/working/super_voz_resultados"
   required_env:
+    - "TERABOX_NDUS"
+  upload_required_env:
     - "TERABOX_NDUS"
     - "TERABOX_JS_TOKEN"
     - "TERABOX_CSRF_TOKEN"
@@ -29,7 +36,20 @@ terabox:
     - "TERABOX_NDUT_FMT"
   install_commands: []
   login_command: []
-  download_command: []
+  download_command:
+    - "{python}"
+    - "{script_dir}/terabox_uploadercli_sync.py"
+    - "download"
+    - "--local-dir"
+    - "{local_dir}"
+    - "--remote-dir"
+    - "{remote_dir}"
+    - "--tool-dir"
+    - "{cli}"
+    - "--share-url"
+    - "{restore_share_url}"
+    - "--share-password"
+    - "{restore_share_password}"
   upload_command:
     - "{python}"
     - "{script_dir}/terabox_uploadercli_sync.py"

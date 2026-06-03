@@ -496,6 +496,8 @@ def render_terabox_command(template: list[str], tb_cfg: dict, local_dir: Path, r
         "local_dir": str(local_dir),
         "remote_dir": remote_dir,
         "ndus": ndus,
+        "restore_share_url": tb_cfg.get("restore_share_url", ""),
+        "restore_share_password": tb_cfg.get("restore_share_password", ""),
     }
     return [str(part).format(**values) for part in template]
 
@@ -504,7 +506,11 @@ def run_terabox_command(template: list[str], tb_cfg: dict, local_dir: Path, remo
     if not template:
         return False
     cmd = render_terabox_command(template, tb_cfg, local_dir, remote_dir, ndus)
-    display_cmd = ["***" if arg == ndus and ndus else arg for arg in cmd]
+    restore_password = str(tb_cfg.get("restore_share_password", ""))
+    display_cmd = [
+        "***" if (arg == ndus and ndus) or (arg == restore_password and restore_password) else arg
+        for arg in cmd
+    ]
     try:
         run(cmd, check=check, display_cmd=display_cmd)
         return True
@@ -607,6 +613,35 @@ def terabox_download_styletts2(tb_cfg: dict | None, style_dir: Path) -> None:
     print(f"[TeraBox] Tentando baixar estado remoto {remote_dir} -> {local_dir}")
     local_dir.mkdir(parents=True, exist_ok=True)
     run_terabox_command(command, tb_cfg, local_dir, remote_dir, ndus, check=False)
+    normalize_restored_styletts2(style_dir)
+
+
+def normalize_restored_styletts2(style_dir: Path) -> int:
+    checkpoint_dir = style_dir / "Models" / "super_Voz"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+
+    for nested in [
+        style_dir / "StyleTTS2",
+        style_dir / "styletts2",
+        style_dir / "styllet2",
+    ]:
+        nested_ckpt = nested / "Models" / "super_Voz"
+        if nested_ckpt.exists():
+            copied += copy_tree_files(nested_ckpt, checkpoint_dir)
+
+    for checkpoint in sorted(style_dir.rglob("epoch_2nd_*.pth")):
+        if checkpoint_dir in checkpoint.parents:
+            continue
+        dst = checkpoint_dir / checkpoint.name
+        if dst.exists() and dst.stat().st_size == checkpoint.stat().st_size:
+            continue
+        shutil.copy2(checkpoint, dst)
+        copied += 1
+
+    if copied:
+        print(f"[RESTORE] Checkpoints normalizados em {checkpoint_dir}: {copied} arquivo(s).")
+    return copied
 
 
 def terabox_upload_checkpoints(tb_cfg: dict | None, style_dir: Path) -> bool:
@@ -615,6 +650,14 @@ def terabox_upload_checkpoints(tb_cfg: dict | None, style_dir: Path) -> bool:
 
     checkpoint_dir = style_dir / "Models" / "super_Voz"
     if not checkpoint_dir.exists():
+        return False
+
+    missing_env = [name for name in tb_cfg.get("upload_required_env", []) or [] if not os.environ.get(str(name))]
+    if missing_env:
+        print(
+            "[TeraBox][AVISO] Upload pulado; secrets ausentes: "
+            + ", ".join(map(str, missing_env))
+        )
         return False
 
     ndus = get_terabox_ndus(tb_cfg)
@@ -859,6 +902,7 @@ def sync_outputs(style_dir: Path, dataset_dir: Path, cfg: dict, s3=None, bucket=
     print("="*60)
     print(f"Checkpoints em: {style_dir / 'Models' / 'super_Voz'}")
     print(f"Dataset preparado em: {dataset_dir}")
+    materialize_visible_outputs(style_dir, dataset_dir, cfg)
     r2_cfg = cfg.get("cloudflare_r2", {})
     if r2_cfg.get("disable_r2_uploads"):
         print("Nota: upload/sync R2 desativado por disable_r2_uploads=true; downloads R2 continuam permitidos.")
@@ -873,6 +917,27 @@ def sync_outputs(style_dir: Path, dataset_dir: Path, cfg: dict, s3=None, bucket=
         print("Nota: R2 sem configuracao completa; arquivos ficaram apenas em /kaggle/working.")
         print("Em Kaggle Commit, /kaggle/working entra nos outputs do notebook.")
     print("="*60 + "\n")
+
+
+def materialize_visible_outputs(style_dir: Path, dataset_dir: Path, cfg: dict) -> None:
+    tb_cfg = cfg.get("terabox", {}) or {}
+    if not tb_cfg.get("keep_visible_outputs", True):
+        return
+
+    output_root = Path(tb_cfg.get("visible_output_dir") or cfg.get("output_dir") or "/kaggle/working/super_voz_resultados")
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    items = {
+        style_dir / "Models" / "super_Voz": output_root / "checkpoints",
+        dataset_dir: output_root / "dataset_styletts2",
+        Path(cfg.get("output_dir", "/kaggle/working/super_Voz_outputs")): output_root / "outputs",
+    }
+    for src, dst in items.items():
+        if not src.exists():
+            continue
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+    print(f"Pastas visiveis para download no Kaggle: {output_root}")
 
 
 def main() -> int:
@@ -917,7 +982,6 @@ def main() -> int:
 
     restore_styletts2_from_candidates(cfg, style_dir)
     terabox_cfg = setup_terabox(cfg)
-    terabox_download_styletts2(terabox_cfg, style_dir)
 
     patch_pytorch_compatibility(style_dir)
     patch_styletts2_oom_safety(style_dir)
@@ -995,6 +1059,8 @@ def main() -> int:
         prepare_cmd.extend(["--phonemize", "--phonemizer_language", str(cfg.get("phonemizer_language", "pt-br"))])
 
     run(prepare_cmd, cwd=project_dir)
+
+    terabox_download_styletts2(terabox_cfg, style_dir)
 
     # Copiar listas para o StyleTTS2
     (style_dir / "Data").mkdir(parents=True, exist_ok=True)
