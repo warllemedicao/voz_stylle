@@ -14,7 +14,7 @@ enable_resemble_enhance: true
 # TERABOX_NDUS, TERABOX_JS_TOKEN, TERABOX_CSRF_TOKEN, TERABOX_BROWSER_ID e TERABOX_NDUT_FMT.
 # Como nao existe CLI oficial estavel do TeraBox, o upload usa um wrapper configuravel.
 terabox:
-  enabled: false
+  enabled: true
   ndus_env: "TERABOX_NDUS"
   cookie_ndus: ""
   cli_path: "/kaggle/working/TeraboxUploaderCLI"
