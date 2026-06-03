@@ -14,8 +14,10 @@ else:
     print("--- Clonando Repositório ---")
     subprocess.run(["git", "clone", REPO_URL, str(PROJECT_ROOT)], check=True)
 
-# Localiza o subdiretório do projeto
-PROJECT_DIR = PROJECT_ROOT / "super_Voz"
+# Localiza o subdiretório Kaggle do projeto
+PROJECT_DIR = PROJECT_ROOT / "super_Voz" / "kaglle"
+if not (PROJECT_DIR / "scripts" / "run_kaggle_styletts2.py").exists():
+    raise FileNotFoundError(f"Runner Kaggle nao encontrado em {PROJECT_DIR}")
 os.chdir(PROJECT_DIR)
 
 print(f"✅ Pronto! Diretório atual: {os.getcwd()}")

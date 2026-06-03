@@ -32,13 +32,32 @@ O erro observado foi:
 /usr/bin/python3: can't open file '/kaggle/working/Super_voz/limpeza_ia.py': [Errno 2] No such file or directory
 ```
 
-A causa era o runner definir `project_dir` como `/kaggle/working/Super_voz`, enquanto o arquivo correto esta em:
+No log mais recente, os secrets R2 funcionaram: a linha `Audios brutos importados do R2: 523` confirma que o download dos audios foi concluido. A falha aconteceu depois, na etapa de limpeza, porque uma versao antiga do runner foi executada a partir de:
+
+```text
+/kaggle/working/Super_voz/super_Voz/scripts/run_kaggle_styletts2.py
+```
+
+Esse caminho nao e mais o fluxo Kaggle correto. O arquivo de limpeza existe em:
 
 ```text
 /kaggle/working/Super_voz/super_Voz/kaglle/limpeza_ia.py
 ```
 
-O runner agora separa:
+O runner correto fica em:
+
+```text
+/kaggle/working/Super_voz/super_Voz/kaglle/scripts/run_kaggle_styletts2.py
+```
+
+Correcoes aplicadas:
+
+- O notebook agora prefere explicitamente `super_Voz/kaglle/scripts/run_kaggle_styletts2.py` e falha cedo se esse arquivo nao existir.
+- `run_kaggle_oneclick.py` agora entra em `super_Voz/kaglle`, nao em `super_Voz`.
+- O runner chama `limpeza_ia.py` por caminho absoluto, eliminando ambiguidade de `cwd`.
+- Foram adicionados wrappers de compatibilidade em `scripts/`, `limpeza_ia.py`, `super_Voz/scripts/` e `super_Voz/limpeza_ia.py`. Se um notebook antigo ainda chamar `super_Voz/scripts/run_kaggle_styletts2.py`, `scripts/run_kaggle_styletts2.py` ou `python limpeza_ia.py` a partir da raiz do clone ou de `super_Voz`, ele sera redirecionado para os arquivos reais em `super_Voz/kaglle`.
+
+O runner separa:
 
 - `code_dir`: pasta do codigo Kaggle, `super_Voz/kaglle`;
 - `data_root`: raiz de dados/runtime, por padrao `/kaggle/working/Super_voz`.
@@ -49,6 +68,8 @@ Assim, `limpeza_ia.py` e `prepare_styletts2_dataset.py` rodam a partir da pasta 
 /kaggle/working/Super_voz/Audios_brutos
 /kaggle/working/Super_voz/Audios_processados
 ```
+
+Com os wrappers, mesmo que o Kaggle ainda mostre `cwd: /kaggle/working/Super_voz`, `cwd: /kaggle/working/Super_voz/super_Voz` ou execute `super_Voz/scripts/run_kaggle_styletts2.py`, a execucao deve cair no fluxo corrigido de `super_Voz/kaglle`. Se o log ainda mostrar erro abrindo `/kaggle/working/Super_voz/limpeza_ia.py`, o clone no Kaggle esta anterior a este commit; limpe `/kaggle/working/Super_voz` ou force `git reset --hard origin/main` antes de rodar.
 
 ## Entrada de audios
 
@@ -104,6 +125,8 @@ R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
 R2_RAW_AUDIO_PREFIX
 ```
+
+O arquivo `styletts2_kaggle_config.yml` nao deve guardar access key ou secret key. Deixe esses campos vazios no YAML e use os Kaggle Secrets acima. O runner preenche a configuracao a partir das variaveis de ambiente carregadas pelo notebook.
 
 ## TeraBox
 

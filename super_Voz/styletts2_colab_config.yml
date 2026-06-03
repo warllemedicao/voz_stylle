@@ -7,9 +7,9 @@ styletts2_dir: "/content/drive/MyDrive/StyleTTS2"
 
 # Configuração do Cloudflare R2 (S3-compatible)
 cloudflare_r2:
-  endpoint_url: "https://dcd864c77e805b2f1488a63f44732e08.r2.cloudflarestorage.com"
-  access_key_id: "a9692b69ee0785f2c3ffd4bc66b56f88"
-  secret_access_key: "ed3f7dd6dcdec6041fd603a1bb57e67775f3f0ed92752a9b295f002f113241c2"
+  endpoint_url: ""
+  access_key_id: ""
+  secret_access_key: ""
   bucket_name: "super-voz"
   raw_audio_prefix: "super_voz/Audios_Brutos/"
   # processed_audio_prefix: "super_voz/Audios_processados/" # REMOVIDO PARA FORÇAR LIMPEZA IA COMPLETA

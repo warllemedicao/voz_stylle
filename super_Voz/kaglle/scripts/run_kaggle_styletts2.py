@@ -888,7 +888,7 @@ def main() -> int:
     print("\n[INFO] Iniciando Limpeza IA (necessário para garantir formato StyleTTS2)...")
     run([
         sys.executable,
-        "limpeza_ia.py",
+        str(project_dir / "limpeza_ia.py"),
         "--input_dir", str(local_raw),
         "--output_dir", str(local_processed),
         "--ambiente", "kaggle",
