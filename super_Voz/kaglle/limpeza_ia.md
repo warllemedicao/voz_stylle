@@ -45,3 +45,10 @@
 - A padronização final permanece obrigatória em todos os casos: 24 kHz, mono, PCM 16-bit, trim de silêncio e normalização.
 - Se o Resemble falhar, der erro de device ou a saída reprovar validação de duração/RMS/pico, o original é preservado e ainda passa pela padronização final segura.
 - Essa alteração corrige a regressão em que o Kaggle deixava `SUPER_VOZ_ENABLE_RESEMBLE=0`, fazendo o script copiar o original após detectar defeito e aplicar somente a limpeza determinística.
+
+## [2026-06-03] Ativação forçada no runner Kaggle
+- A reativação por `os.environ.setdefault("SUPER_VOZ_ENABLE_RESEMBLE", "1")` não era suficiente quando a sessão Kaggle já herdava `SUPER_VOZ_ENABLE_RESEMBLE=0`.
+- O notebook agora usa atribuição direta: `os.environ["SUPER_VOZ_ENABLE_RESEMBLE"] = "1"`.
+- `run_kaggle_oneclick.py` também define a variável como `1`.
+- `scripts/run_kaggle_styletts2.py` força `SUPER_VOZ_ENABLE_RESEMBLE=1` quando `enable_resemble_enhance: true` no YAML.
+- Com o enhancer habilitado, o runner chama `limpeza_ia.py --enhancer resemble`, evitando que `--enhancer auto` respeite um valor antigo `0` herdado do ambiente.

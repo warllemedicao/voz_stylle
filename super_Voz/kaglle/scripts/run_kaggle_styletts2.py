@@ -825,6 +825,11 @@ def main() -> int:
 
     # Configuração de memória
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    if cfg.get("enable_resemble_enhance", True):
+        os.environ["SUPER_VOZ_ENABLE_RESEMBLE"] = "1"
+    else:
+        os.environ["SUPER_VOZ_ENABLE_RESEMBLE"] = "0"
+    print(f"[INFO] SUPER_VOZ_ENABLE_RESEMBLE={os.environ['SUPER_VOZ_ENABLE_RESEMBLE']}")
 
     # Verifica GPU antes de tudo para evitar SIGSEGV
     if not verify_gpu():
@@ -897,7 +902,7 @@ def main() -> int:
         "--input_dir", str(local_raw),
         "--output_dir", str(local_processed),
         "--ambiente", "kaggle",
-        "--enhancer", "auto",
+        "--enhancer", "resemble" if cfg.get("enable_resemble_enhance", True) else "auto",
         "--force",
     ], cwd=project_dir)
 

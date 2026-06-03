@@ -6,6 +6,7 @@ import sys
 # 🛠️ 1. Configurar Repositório e Ambiente
 REPO_URL = "https://github.com/warllemedicao/voz_stylle.git"
 PROJECT_ROOT = Path("/kaggle/working/Super_voz")
+os.environ["SUPER_VOZ_ENABLE_RESEMBLE"] = "1"
 
 if PROJECT_ROOT.exists():
     print("--- Atualizando Repositório ---")

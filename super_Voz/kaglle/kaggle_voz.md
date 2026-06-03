@@ -113,9 +113,11 @@ Com isso, `limpeza_ia.py --enhancer auto` detectava o defeito, mas o `AudioEnhan
 
 Correcao aplicada:
 
-- `run_kaggle_styletts2.ipynb` agora define `SUPER_VOZ_ENABLE_RESEMBLE=1` por padrao.
-- O runner ja instala `resemble-enhance` quando essa variavel nao e `0`.
-- A chamada continua `limpeza_ia.py --enhancer auto`; nesse modo, audios com `hissing` ou `background_noise` usam `denoise`, e `degraded_voice` usa `enhance`.
+- `run_kaggle_styletts2.ipynb` agora define `SUPER_VOZ_ENABLE_RESEMBLE=1` com atribuicao direta, nao `setdefault`, para sobrescrever sessoes Kaggle antigas que ainda tenham `0`.
+- `run_kaggle_oneclick.py` tambem define `SUPER_VOZ_ENABLE_RESEMBLE=1`.
+- `scripts/run_kaggle_styletts2.py` le `enable_resemble_enhance: true` do YAML e forca `SUPER_VOZ_ENABLE_RESEMBLE=1` antes de instalar dependencias e antes da limpeza.
+- A chamada da limpeza passou a usar `limpeza_ia.py --enhancer resemble` quando `enable_resemble_enhance` esta ativo. Assim o reparo nao depende mais de `--enhancer auto` nem de uma variavel de ambiente herdada.
+- Nesse modo, audios com `hissing` ou `background_noise` usam `denoise`, e `degraded_voice` usa `enhance`.
 - Se o Resemble falhar ou a saida for reprovada pelas validacoes de duracao/RMS/pico, o pipeline preserva o original e ainda aplica a padronizacao final segura.
 
 ## Entrada de audios

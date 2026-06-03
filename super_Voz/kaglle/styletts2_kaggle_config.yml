@@ -7,6 +7,7 @@ styletts2_repo: "https://github.com/yl4579/StyleTTS2.git"
 styletts2_dir: "/kaggle/working/StyleTTS2"
 output_dir: "/kaggle/working/super_Voz_outputs"
 r2_sync_interval_seconds: 600
+enable_resemble_enhance: true
 
 # Persistencia opcional via TeraBox.
 # Recomendado: use Kaggle Secrets. Para o modo padrao abaixo, crie:
