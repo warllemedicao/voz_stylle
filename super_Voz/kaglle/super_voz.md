@@ -157,6 +157,16 @@ O Colab pode interromper sessões por limite de uso de GPU antes das 50 epocas. 
 - `save_freq` foi reduzido para `1`, salvando a cada epoca.
 - A chamada de treino agora filtra a saída extensa do StyleTTS2 e mostra uma barra compacta por epoca/passo. As linhas completas continuam em `Models/super_Voz/train.log`.
 
+## Atualização de Progresso no Kaggle (03/06/2026)
+
+O StyleTTS2 pode registrar as linhas de progresso apenas em `Models/super_Voz/train.log`, sem repassar essas linhas diretamente para o console do notebook. Para evitar a sensação de travamento:
+
+- `run_kaggle_styletts2.py` agora acompanha `Models/super_Voz/train.log` em tempo real durante o treino.
+- Quando encontra linhas `Epoch [...], Step [...], Loss: ...`, o wrapper imprime a barra compacta direto na célula do Kaggle.
+- A barra continua mostrando progresso por epoca/passo de treino, não por checkpoint gerado.
+- Linhas de validação também são refletidas no console como `[VALIDACAO]`.
+- O treino, dataset e parâmetros não foram alterados; a mudança é apenas de visualização/monitoramento.
+
 ## Modificações Realizadas
 - [x] Criação de `super_voz.md`.
 - [x] Upgrade do `limpeza_ia.py` para a **Versão 8** (Explicit Loading + CPU Fallback).
@@ -171,6 +181,7 @@ O Colab pode interromper sessões por limite de uso de GPU antes das 50 epocas. 
 - [x] Tratamento único por `defeito_principal`.
 - [x] Retomada automática do último checkpoint `epoch_2nd_*.pth`.
 - [x] Barra compacta de progresso durante o treinamento.
+- [x] Espelhamento do progresso de `train.log` no console do Kaggle.
 - [x] Salvamento de checkpoint a cada epoca (`save_freq: 1`).
 
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE

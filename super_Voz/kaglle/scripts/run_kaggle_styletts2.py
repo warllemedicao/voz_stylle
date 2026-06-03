@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
@@ -25,6 +26,9 @@ def run_training_with_progress(cmd, cwd=None) -> None:
         print("cwd:", cwd)
     print("[TREINO] Iniciando. O console mostrara uma barra por epoca/passo; detalhes ficam em Models/super_Voz/train.log.")
 
+    log_path = Path(cwd) / "Models" / "super_Voz" / "train.log" if cwd else None
+    log_start_pos = log_path.stat().st_size if log_path and log_path.exists() else 0
+
     process = subprocess.Popen(
         cmd,
         cwd=str(cwd) if cwd else None,
@@ -39,14 +43,20 @@ def run_training_with_progress(cmd, cwd=None) -> None:
     val_re = re.compile(r"Validation loss: ([0-9.]+), Dur loss: ([0-9.]+), F0 loss: ([0-9.]+)")
     important_re = re.compile(r"(error|traceback|cuda|out of memory|oom|killed|exception|saving|loading|checkpoint)", re.I)
     current_line = ""
+    last_progress = None
+    print_lock = threading.Lock()
+    stop_log_tail = threading.Event()
 
-    for raw_line in process.stdout:
-        line = raw_line.strip()
-        if not line:
-            continue
+    def handle_progress_line(line: str) -> bool:
+        nonlocal current_line, last_progress
 
         train_match = train_re.search(line)
         if train_match:
+            progress_key = ("train",) + train_match.groups()
+            if progress_key == last_progress:
+                return True
+            last_progress = progress_key
+
             epoch, epochs, step, steps, loss = train_match.groups()
             step_i = int(step)
             steps_i = max(1, int(steps))
@@ -54,25 +64,70 @@ def run_training_with_progress(cmd, cwd=None) -> None:
             bar = "#" * filled + "-" * (30 - filled)
             current_line = f"[TREINO] Epoca {epoch}/{epochs} |{bar}| passo {step}/{steps} loss {loss}"
             print("\r" + current_line, end="", flush=True)
-            continue
+            return True
 
         val_match = val_re.search(line)
         if val_match:
+            progress_key = ("val",) + val_match.groups()
+            if progress_key == last_progress:
+                return True
+            last_progress = progress_key
+
             if current_line:
                 print()
                 current_line = ""
             val_loss, dur_loss, f0_loss = val_match.groups()
             print(f"[VALIDACAO] loss {val_loss} | dur {dur_loss} | f0 {f0_loss}")
+            return True
+
+        return False
+
+    log_position = [log_start_pos]
+
+    def drain_train_log() -> None:
+        if not log_path:
+            return
+
+        if not log_path.exists():
+            return
+
+        with log_path.open("r", encoding="utf-8", errors="replace") as log_file:
+            log_file.seek(log_position[0])
+            for line in log_file:
+                with print_lock:
+                    handle_progress_line(line.strip())
+            log_position[0] = log_file.tell()
+
+    def tail_train_log() -> None:
+        while not stop_log_tail.is_set():
+            drain_train_log()
+            time.sleep(1)
+
+    log_thread = threading.Thread(target=tail_train_log, daemon=True)
+    log_thread.start()
+
+    for raw_line in process.stdout:
+        line = raw_line.strip()
+        if not line:
             continue
 
-        if important_re.search(line):
-            if current_line:
-                print()
-                current_line = ""
-            print(line)
+        with print_lock:
+            if handle_progress_line(line):
+                continue
 
-    if current_line:
-        print()
+            if important_re.search(line):
+                if current_line:
+                    print()
+                    current_line = ""
+                print(line)
+
+    stop_log_tail.set()
+    log_thread.join(timeout=2)
+    drain_train_log()
+
+    with print_lock:
+        if current_line:
+            print()
 
     returncode = process.wait()
     if returncode != 0:
@@ -227,15 +282,42 @@ def torch_packages_for_runtime() -> list[str]:
 
         if torch.cuda.is_available():
             major, minor = torch.cuda.get_device_capability(0)
-            if major < 7:
+            if major < 6:
                 print(
-                    f"[INFO] GPU sm_{major}{minor} detectada; fixando Torch 2.5.1 para compatibilidade com P100/K80."
+                    f"[INFO] GPU sm_{major}{minor} detectada; fixando Torch 2.5.1 para compatibilidade com CUDA legado."
                 )
                 return ["torch==2.5.1", "torchaudio==2.5.1", "torchvision==0.20.1"]
     except Exception as exc:
         print(f"[AVISO] Nao foi possivel detectar capability CUDA antes do pip install: {exc}")
 
-    return ["torch", "torchaudio", "torchvision"]
+    return ["torch>=2.6", "torchaudio>=2.6", "torchvision>=0.21"]
+
+
+def ensure_transformers_torch_compatibility() -> None:
+    """Evita a combinacao torch<2.6 com transformers novo, que bloqueia torch.load."""
+    try:
+        import torch
+    except Exception as exc:
+        print(f"[AVISO] Nao foi possivel verificar versao do torch: {exc}")
+        return
+
+    version_text = torch.__version__.split("+", 1)[0]
+    parts = []
+    for item in version_text.split(".")[:2]:
+        try:
+            parts.append(int(item))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 2:
+        parts.append(0)
+
+    if tuple(parts) < (2, 6):
+        print(
+            "[INFO] Torch < 2.6 detectado; fixando transformers<4.49 para evitar bloqueio de torch.load."
+        )
+        run([sys.executable, "-m", "pip", "install", "-q", "transformers<4.49"])
+    else:
+        print(f"[INFO] Torch {torch.__version__} detectado; transformers atual pode carregar modelos com seguranca.")
 
 
 def install_dependencies(style_dir: Path) -> None:
@@ -299,6 +381,8 @@ def install_dependencies(style_dir: Path) -> None:
     requirements = style_dir / "requirements.txt"
     if requirements.exists():
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)], check=False)
+
+    ensure_transformers_torch_compatibility()
 
 
 def get_r2_client(cfg: dict):
