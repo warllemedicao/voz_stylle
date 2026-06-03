@@ -14,7 +14,7 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 
 ## Fluxo do notebook
 
-1. Clona ou atualiza `https://github.com/warllemedicao/Voz_styllett2.git` em `/kaggle/working/Super_voz`.
+1. Clona ou atualiza `https://github.com/warllemedicao/voz_stylle.git` em `/kaggle/working/Super_voz`.
 2. Localiza `run_kaggle_styletts2.py` dentro de `super_Voz/kaglle/scripts`.
 3. Entra em `/kaggle/working/Super_voz/super_Voz/kaglle`.
 4. Gera `styletts2_kaggle_sem_cloudflare.yml`, mantendo download R2 permitido e bloqueando upload R2.
@@ -23,6 +23,36 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 ```bash
 python -u scripts/run_kaggle_styletts2.py --config styletts2_kaggle_sem_cloudflare.yml
 ```
+
+## Correcao do erro de runner nao encontrado
+
+O erro:
+
+```text
+FileNotFoundError: Runner Kaggle nao encontrado em /kaggle/working/Super_voz/super_Voz/kaglle/scripts/run_kaggle_styletts2.py
+```
+
+foi causado pelo notebook clonar o repositorio antigo/errado:
+
+```text
+https://github.com/warllemedicao/Voz_styllett2.git
+```
+
+O commit anterior foi enviado para:
+
+```text
+https://github.com/warllemedicao/voz_stylle.git
+```
+
+Como o Kaggle clonava o repositorio errado, a pasta `super_Voz/kaglle` atualizada nao existia no clone novo e o notebook parava antes de carregar secrets ou rodar o pipeline.
+
+Correcao aplicada:
+
+- `run_kaggle_styletts2.ipynb`, `run_kaggle_oneclick.py` e `styletts2_kaggle_config.yml` agora usam `https://github.com/warllemedicao/voz_stylle.git`.
+- Quando `/kaggle/working/Super_voz` ja existe, o notebook e o one-click atualizam `origin` com `git remote set-url origin https://github.com/warllemedicao/voz_stylle.git` antes de `fetch/pull`. Isso evita reutilizar um clone antigo apontando para `Voz_styllett2.git`.
+- A mensagem de erro do notebook agora lista quais `run_kaggle_styletts2.py` foram encontrados no clone, para diagnosticar rapidamente clone errado ou estrutura divergente.
+
+Depois de atualizar no GitHub, se o Kaggle ainda clonar `Voz_styllett2.git`, o notebook usado no Kaggle esta desatualizado. Importe/cole a versao nova do notebook ou atualize a celula manualmente para `https://github.com/warllemedicao/voz_stylle.git`.
 
 ## Correcao do erro `limpeza_ia.py`
 
