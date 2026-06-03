@@ -146,6 +146,27 @@ cloudflare_r2:
 
 Isso bloqueia upload/sync de checkpoints e resultados para R2, mas preserva o download dos audios brutos quando `raw_audio_prefix` e credenciais existem.
 
+## Correcao do aviso R2 incompleto
+
+O erro atual foi:
+
+```text
+[R2][AVISO] Configuracao R2 incompleta; faltando: endpoint_url, access_key_id, secret_access_key
+[AVISO] Configuração R2 ausente ou incompleta.
+❌ NENHUM ÁUDIO BRUTO ENCONTRADO!
+```
+
+A causa foi a config base do Kaggle ter ficado com `cloudflare_r2.endpoint_url` vazio. Isso fazia o runner considerar o R2 incompleto mesmo antes de avaliar as credenciais.
+
+Correcao aplicada:
+
+- `styletts2_kaggle_config.yml` voltou a trazer os dados nao-secretos de leitura: `endpoint_url`, `bucket_name` e `raw_audio_prefix`.
+- `access_key_id` e `secret_access_key` continuam vazios no Git de proposito. Eles devem vir dos Kaggle Secrets `R2_ACCESS_KEY_ID` e `R2_SECRET_ACCESS_KEY`.
+- O notebook parou de imprimir erro para secrets opcionais de TeraBox e overrides opcionais de R2. Ele so marca como obrigatorios os dois secrets sensiveis de leitura R2.
+- O runner agora explica que, quando faltarem `access_key_id` ou `secret_access_key`, o download R2 precisa desses dois Kaggle Secrets. A trava `disable_r2_uploads: true` continua bloqueando apenas upload para Cloudflare; ela nao bloqueia o download dos audios.
+
+Se esses dois secrets R2 nao existirem no kernel Kaggle e tambem nao houver Kaggle Dataset com audios, o pipeline vai falhar corretamente por falta de entrada.
+
 Secrets aceitos:
 
 ```text

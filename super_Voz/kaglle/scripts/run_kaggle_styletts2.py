@@ -312,6 +312,11 @@ def get_r2_client(cfg: dict):
     if missing:
         if r2_cfg:
             print(f"[R2][AVISO] Configuracao R2 incompleta; faltando: {', '.join(missing)}")
+            if any(key in missing for key in ("access_key_id", "secret_access_key")):
+                print(
+                    "[R2][DICA] Download do Cloudflare R2 precisa dos Kaggle Secrets "
+                    "R2_ACCESS_KEY_ID e R2_SECRET_ACCESS_KEY. Upload R2 continua bloqueado."
+                )
         return None, None
 
     s3 = boto3.client(
