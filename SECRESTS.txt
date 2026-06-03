@@ -1,0 +1,42 @@
+TERABOX_NDUS - Yz5BdrnteHui7HlOSEOty-yGw6yI451HA7x-dzGd
+TERABOX_CSRF_TOKEN - TqQ3nR9XmKYirSnhsHKVATmj
+TERABOX_BROWSER_ID - JAppvTXcIDF4wU4dteao3gJFtHCZSVkYKL_TPjYGH4LqswIhfmU9oxVFWHpPT9HzwhYJBbE1Vl2I3690
+TERABOX_NDUT_FMT - 465E7EFDCCE80E2698284A2AA8B89740CFADA4E47F36A305993CD70C183F373D
+TERABOX_JS_TOKEN - 3F893366E759FEC9211EAC98E26D660675D37A30923D99D1BAF801DA3231D16279B03B7A070009668A4FB7D93D95C080AD7CD1C93326FE63A989D4CBFE581106
+
+
+id:93403002875141765
+event:open
+retry:1000
+data:<nil>
+
+3F893366E759FEC9211EAC98E26D660675D37A30923D99D1BAF801DA3231D16279B03B7A070009668A4FB7D93D95C080AD7CD1C93326FE63A989D4CBFE581106
+ 
+
+secrets
+
+errro 
+
+✅ Audios brutos importados do R2: 523
+
+[INFO] Iniciando Limpeza IA (necessário para garantir formato StyleTTS2)...
+
+$ /usr/bin/python3 limpeza_ia.py --input_dir /kaggle/working/Super_voz/Audios_brutos --output_dir /kaggle/working/Super_voz/Audios_processados --ambiente kaggle --enhancer auto --force
+cwd: /kaggle/working/Super_voz
+/usr/bin/python3: can't open file '/kaggle/working/Super_voz/limpeza_ia.py': [Errno 2] No such file or directory
+Traceback (most recent call last):
+  File "/kaggle/working/Super_voz/super_Voz/scripts/run_kaggle_styletts2.py", line 944, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/kaggle/working/Super_voz/super_Voz/scripts/run_kaggle_styletts2.py", line 864, in main
+    run([
+  File "/kaggle/working/Super_voz/super_Voz/scripts/run_kaggle_styletts2.py", line 19, in run
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=check)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', 'limpeza_ia.py', '--input_dir', '/kaggle/working/Super_voz/Audios_brutos', '--output_dir', '/kaggle/working/Super_voz/Audios_processados', '--ambiente', 'kaggle', '--enhancer', 'auto', '--force']' returned non-zero exit status 2.
+
+[ERRO] O pipeline falhou com código 1.
+Pacote final: /kaggle/working/super_voz_resultados.zip
+Se TeraBox nao estiver configurado, baixe esse zip nos outputs do Kaggle e envie pelo app/site da sua conta
