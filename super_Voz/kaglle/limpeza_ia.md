@@ -35,3 +35,13 @@
 - A limpeza continua exibindo análise, tratamento e transcrição por arquivo.
 - Após a limpeza e preparação do dataset, a etapa de treinamento passou a usar uma visualização compacta de progresso no orquestrador Colab/Kaggle.
 - Essa mudança evita que a saída fonemizada/verbosa do fluxo de treino polua o console, mantendo os detalhes completos em `Models/super_Voz/train.log`.
+
+## [2026-06-03] Reativação do Resemble no fluxo Kaggle
+- O notebook Kaggle `run_kaggle_styletts2.ipynb` voltou a definir `SUPER_VOZ_ENABLE_RESEMBLE=1` por padrão.
+- Com isso, `limpeza_ia.py --enhancer auto --ambiente kaggle` não apenas identifica áudios defeituosos: ele tenta reparar com Resemble Enhance antes da padronização final.
+- O fluxo ativo continua escolhendo um único tratamento por defeito dominante:
+  - `hissing` e `background_noise` usam `denoise`;
+  - `degraded_voice` usa `enhance`.
+- A padronização final permanece obrigatória em todos os casos: 24 kHz, mono, PCM 16-bit, trim de silêncio e normalização.
+- Se o Resemble falhar, der erro de device ou a saída reprovar validação de duração/RMS/pico, o original é preservado e ainda passa pela padronização final segura.
+- Essa alteração corrige a regressão em que o Kaggle deixava `SUPER_VOZ_ENABLE_RESEMBLE=0`, fazendo o script copiar o original após detectar defeito e aplicar somente a limpeza determinística.
