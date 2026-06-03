@@ -282,42 +282,15 @@ def torch_packages_for_runtime() -> list[str]:
 
         if torch.cuda.is_available():
             major, minor = torch.cuda.get_device_capability(0)
-            if major < 6:
+            if major < 7:
                 print(
-                    f"[INFO] GPU sm_{major}{minor} detectada; fixando Torch 2.5.1 para compatibilidade com CUDA legado."
+                    f"[INFO] GPU sm_{major}{minor} detectada; fixando Torch 2.5.1 para compatibilidade com P100/K80."
                 )
                 return ["torch==2.5.1", "torchaudio==2.5.1", "torchvision==0.20.1"]
     except Exception as exc:
         print(f"[AVISO] Nao foi possivel detectar capability CUDA antes do pip install: {exc}")
 
-    return ["torch>=2.6", "torchaudio>=2.6", "torchvision>=0.21"]
-
-
-def ensure_transformers_torch_compatibility() -> None:
-    """Evita a combinacao torch<2.6 com transformers novo, que bloqueia torch.load."""
-    try:
-        import torch
-    except Exception as exc:
-        print(f"[AVISO] Nao foi possivel verificar versao do torch: {exc}")
-        return
-
-    version_text = torch.__version__.split("+", 1)[0]
-    parts = []
-    for item in version_text.split(".")[:2]:
-        try:
-            parts.append(int(item))
-        except ValueError:
-            parts.append(0)
-    while len(parts) < 2:
-        parts.append(0)
-
-    if tuple(parts) < (2, 6):
-        print(
-            "[INFO] Torch < 2.6 detectado; fixando transformers<4.49 para evitar bloqueio de torch.load."
-        )
-        run([sys.executable, "-m", "pip", "install", "-q", "transformers<4.49"])
-    else:
-        print(f"[INFO] Torch {torch.__version__} detectado; transformers atual pode carregar modelos com seguranca.")
+    return ["torch", "torchaudio", "torchvision"]
 
 
 def install_dependencies(style_dir: Path) -> None:
@@ -381,8 +354,6 @@ def install_dependencies(style_dir: Path) -> None:
     requirements = style_dir / "requirements.txt"
     if requirements.exists():
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)], check=False)
-
-    ensure_transformers_torch_compatibility()
 
 
 def get_r2_client(cfg: dict):
