@@ -293,6 +293,26 @@ def torch_packages_for_runtime() -> list[str]:
     return ["torch", "torchaudio", "torchvision"]
 
 
+def transformer_packages_for_runtime() -> list[str]:
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return ["transformers"]
+
+        major, _minor = torch.cuda.get_device_capability(0)
+        if major < 7:
+            print(
+                "[INFO] Fixando transformers==4.46.3: versões recentes exigem Torch >=2.6 "
+                "para carregar checkpoints PyTorch do Hugging Face."
+            )
+            return ["transformers==4.46.3"]
+    except Exception as exc:
+        print(f"[AVISO] Nao foi possivel detectar versao/compatibilidade antes do pip install: {exc}")
+
+    return ["transformers"]
+
+
 def install_dependencies(style_dir: Path) -> None:
     print("\n--- Instalando Dependências ---")
     
@@ -318,6 +338,7 @@ def install_dependencies(style_dir: Path) -> None:
     os.environ["DS_BUILD_OPS"] = "0"
 
     torch_packages = torch_packages_for_runtime()
+    transformer_packages = transformer_packages_for_runtime()
     run([
         sys.executable,
         "-m",
@@ -325,6 +346,7 @@ def install_dependencies(style_dir: Path) -> None:
         "install",
         "-q",
         *torch_packages,
+        *transformer_packages,
         "accelerate",
         "huggingface_hub",
         "pyyaml",

@@ -282,3 +282,23 @@ Referencias publicas:
 - Use `/kaggle/working/super_voz_resultados.zip` como fallback obrigatorio.
 - Use TeraBox para upload periodico/final de checkpoints somente quando todos os secrets de sessao estiverem atualizados.
 - Use Kaggle Dataset para restaurar checkpoints em novas execucoes.
+
+## Correcao do erro Torch/Transformers no Kaggle
+
+O erro:
+
+```text
+ValueError: Due to a serious vulnerability issue in `torch.load`, even with `weights_only=True`, we now require users to upgrade torch to at least v2.6
+```
+
+nao vem do dataset preparado. No log, `prepared=522`, `train=496`, `val=26` e `missing=0` confirmam que a etapa de dataset passou. A falha acontece no inicio do treino, quando o StyleTTS2 carrega um modelo/checkpoint Hugging Face em formato PyTorch.
+
+Em GPUs antigas do Kaggle, como P100/K80, o runner fixa `torch==2.5.1` para compatibilidade CUDA. Versoes recentes do `transformers` bloqueiam `torch.load` com Torch menor que 2.6 ao carregar checkpoints `.bin`/PyTorch. Como o `requirements.txt` do StyleTTS2 declara `transformers` sem versao, o Kaggle pode instalar uma versao nova demais e quebrar o treino.
+
+Correcao aplicada:
+
+- Para GPU `sm_<7`, o runner mantem `torch==2.5.1`, `torchaudio==2.5.1` e `torchvision==0.20.1`.
+- No mesmo caso, o runner fixa `transformers==4.46.3`, evitando o bloqueio novo de `torch.load` durante o carregamento dos modelos auxiliares do StyleTTS2.
+- Em GPUs mais novas, o runner continua deixando `torch` e `transformers` sem pin rigido.
+
+Se o erro continuar no Kaggle, limpe o runtime ou force reinstalacao para garantir que uma versao recente demais de `transformers` nao ficou carregada na sessao antiga.
