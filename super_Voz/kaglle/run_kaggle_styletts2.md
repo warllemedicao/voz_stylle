@@ -9,8 +9,8 @@ O notebook foi ajustado para rodar o treinamento do StyleTTS2 no Kaggle sem depe
 O motivo principal e evitar taxas de escrita/persistencia no Cloudflare. A estrategia atual e:
 
 - usar Cloudflare R2 ou Kaggle Dataset como entrada de audios;
-- manter checkpoints e resultados em `/kaggle/working`;
-- gerar um ZIP final com os artefatos;
+- sincronizar o pacote completo da voz com Hugging Face Bucket;
+- manter apenas `minha_voz_styletts2/model/best_model.pth` depois de upload confirmado;
 - tentar TeraBox apenas como persistencia opcional, se houver uma CLI configurada e o secret `TERABOX_NDUS`.
 
 ## Politica Cloudflare
@@ -64,18 +64,75 @@ Tambem e possivel anexar um Kaggle Dataset contendo os audios em uma dessas past
 Durante e depois do treino, os principais artefatos ficam em:
 
 ```text
-/kaggle/working/StyleTTS2/Models/super_Voz
+/kaggle/working/StyleTTS2/minha_voz_styletts2
 /kaggle/working/super_Voz_styletts2_data
 /kaggle/working/super_Voz_outputs
 ```
 
-Ao final, o notebook empacota os resultados em:
+Ao final, o notebook informa a pasta local do pacote:
 
 ```text
-/kaggle/working/super_voz_resultados.zip
+/kaggle/working/StyleTTS2/minha_voz_styletts2
 ```
 
-Se nenhuma persistencia externa funcionar, esse ZIP continua disponivel nos outputs do Kaggle, especialmente quando a execucao e feita via `Save Version -> Save & Run All (Commit)`.
+O notebook nao cria uma copia nem um ZIP, pois isso pode duplicar varios gigabytes e causar
+`No space left on device`. Se nenhuma persistencia externa funcionar, salve uma versao com
+`Save Version -> Save & Run All (Commit)` para publicar `/kaggle/working` nos outputs.
+
+## Hugging Face Bucket
+
+Os checkpoints e artefatos da voz sao sincronizados com:
+
+```text
+hf://buckets/warllem/Super_voz
+```
+
+Adicione este Kaggle Secret:
+
+```text
+HF_TOKEN
+```
+
+O token precisa de permissao de escrita no bucket. O runner usa `hf sync` para restaurar o
+pacote antes do treino e sincroniza `/kaggle/working/StyleTTS2/minha_voz_styletts2` durante
+o treino. Depois de um upload confirmado, remove os `epoch_2nd_*.pth` de
+`Models/super_Voz`, mantendo somente `model/best_model.pth` no pacote local.
+
+Nesta configuracao, o bucket e obrigatorio. Se `HF_TOKEN` estiver ausente ou o bucket nao
+puder ser acessado, o treino aborta antes de gerar checkpoints. O runner verifica novos
+checkpoints a cada 5 segundos, remove apenas os checkpoints que ja foram enviados e preserva
+qualquer checkpoint mais novo criado durante um upload.
+
+Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` e
+`Audios_processados` depois que o dataset final e o pacote forem criados. O dataset preparado
+da execucao anterior e os WAVs antigos do pacote sao removidos antes de recriar a versao atual.
+Mensagens `[DISCO]` mostram o espaco usado e livre durante o pipeline.
+Quando `best_model.pth` ja foi restaurado, o checkpoint base LibriTTS nao e baixado novamente.
+No primeiro treinamento, esse checkpoint base e removido depois que o primeiro checkpoint da
+voz for sincronizado com sucesso.
+
+O upload usa `--delete`, portanto o bucket nao acumula artefatos removidos do pacote. Para
+baixar a voz em outro computador:
+
+```text
+hf sync hf://buckets/warllem/Super_voz ./local
+```
+
+No Windows, instale a CLI com:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
+```
+
+Para enviar uma pasta manualmente:
+
+```text
+hf sync ./data hf://buckets/warllem/Super_voz
+```
+
+O pacote inclui `best_model.pth`, `config.yml`, listas e audios do dataset, metadata,
+referencia de voz, requisitos, notebooks oficiais de inferencia, documentacao e os pesos
+auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando estiverem disponiveis.
 
 ## TeraBox opcional
 
@@ -185,13 +242,14 @@ Se um `ndus` tiver sido compartilhado em chat, arquivo ou notebook publico, ele 
 
 ## Arquivos alterados
 
-- `run_kaggle_styletts2.ipynb`: notebook one-click Kaggle com Cloudflare desligado e TeraBox opcional.
-- `scripts/run_kaggle_styletts2.py`: adaptador TeraBox, sincronizacao periodica e upload final.
-- `styletts2_kaggle_config.yml`: Cloudflare desligado por padrao e secao TeraBox configuravel.
-- `README.md`: documentacao resumida da persistencia opcional via TeraBox.
+- `run_kaggle_styletts2.ipynb`: notebook one-click Kaggle com Hugging Face Bucket.
+- `scripts/run_kaggle_styletts2.py`: montagem do pacote, restauracao, sincronizacao e retencao de checkpoint.
+- `styletts2_kaggle_config.yml`: bucket e pasta do pacote configurados.
+- `inference/`: helper de validacao e exemplo de uso dos caminhos do pacote.
 
 ## Estado atual da solucao
 
-A solucao atual evita Cloudflare no Kaggle e preserva uma saida local robusta via ZIP.
+A solucao atual usa Cloudflare apenas como entrada de audios e Hugging Face Bucket como
+persistencia principal dos artefatos da voz.
 
-O TeraBox ainda depende da escolha de uma CLI comunitaria funcional para Linux/Kaggle. Por isso, a integracao foi feita por comandos configuraveis, em vez de fixar uma URL ou uma ferramenta especifica no codigo.
+O TeraBox permanece opcional e desativado por padrao.

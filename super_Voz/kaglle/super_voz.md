@@ -167,6 +167,60 @@ O StyleTTS2 pode registrar as linhas de progresso apenas em `Models/super_Voz/tr
 - Linhas de validação também são refletidas no console como `[VALIDACAO]`.
 - O treino, dataset e parâmetros não foram alterados; a mudança é apenas de visualização/monitoramento.
 
+## Persistência em Hugging Face Bucket (04/06/2026)
+
+Os arquivos da voz neural passam a ser sincronizados com o bucket:
+
+```text
+hf://buckets/warllem/Super_voz
+```
+
+- O runner restaura o bucket antes de escolher o checkpoint de retomada.
+- O pacote local fica em `/kaggle/working/StyleTTS2/minha_voz_styletts2`.
+- Cada sincronização usa `hf sync ... --delete`.
+- Depois que o upload é confirmado, os arquivos `Models/super_Voz/epoch_2nd_*.pth` são apagados para não acumular checkpoints no working.
+- O pacote mantém somente `model/best_model.pth`, necessário para retomada e inferência.
+- O Hugging Face é obrigatório na configuração Kaggle: sem `HF_TOKEN` ou sem acesso ao bucket, o treino aborta antes de gerar checkpoints locais.
+- O runner monitora checkpoints novos a cada 5 segundos e preserva checkpoints mais novos que apareçam enquanto um upload ainda está em andamento.
+- `Audios_brutos` e `Audios_processados` são removidos depois que o dataset final e o pacote forem criados.
+- O dataset preparado de uma execução anterior e os WAVs antigos do pacote são removidos antes de gerar a versão atual.
+- O runner informa o uso e espaço livre do `/kaggle/working` nos pontos principais do pipeline.
+- Quando `best_model.pth` é restaurado, o checkpoint base LibriTTS não é baixado novamente.
+- No primeiro treinamento, o checkpoint base LibriTTS é removido depois que o primeiro checkpoint da voz é enviado.
+- O pacote inclui configuração, dataset preparado, metadata, referência de voz, documentação, requisitos e pesos auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando disponíveis.
+- Os WAVs preparados também são necessários para retomar o treinamento, pois `train_list.txt` e `val_list.txt` apontam para esses arquivos.
+- O StyleTTS2 não usa um vocoder externo separado; o decoder/vocoder treinado está dentro do checkpoint.
+- O projeto oficial fornece notebooks de inferência, não um `inference.py` oficial. Os notebooks `Inference_LibriTTS.ipynb` e `Inference_LJSpeech.ipynb` são incluídos quando disponíveis.
+
+### Como o `/kaggle/working` será usado
+
+`/kaggle/working` é o armazenamento temporário do próprio Kaggle. Se esse disco encher, o treinamento pode falhar com `No space left on device`. O Hugging Face não substitui completamente o disco local durante o treino: o StyleTTS2 ainda precisa ler o código, o dataset final e pelo menos um checkpoint local enquanto está executando.
+
+Fluxo de uso do disco:
+
+1. O notebook valida o `HF_TOKEN` e o acesso ao bucket antes de iniciar o treino.
+2. O pacote remoto é restaurado em `/kaggle/working/StyleTTS2/minha_voz_styletts2`.
+3. Os áudios brutos e processados existem apenas durante download, limpeza e preparação.
+4. O dataset final é criado em `/kaggle/working/super_Voz_styletts2_data`.
+5. O pacote inicial é sincronizado com o bucket.
+6. `Audios_brutos` e `Audios_processados` são apagados antes do treinamento.
+7. Durante o treino, cada checkpoint novo é detectado, copiado para `model/best_model.pth`, enviado ao bucket e removido de `Models/super_Voz` após confirmação.
+8. Se o upload falhar, o checkpoint local é preservado para não perder o treinamento.
+
+Arquivos que precisam permanecer no working durante o treino:
+
+```text
+/kaggle/working/StyleTTS2
+/kaggle/working/super_Voz_styletts2_data
+/kaggle/working/StyleTTS2/minha_voz_styletts2/model/best_model.pth
+```
+
+O pacote também contém `data_reference/wavs`, mas esses WAVs são criados por hard link para o dataset final quando o sistema de arquivos permite. Assim, eles aparecem em duas pastas sem ocupar o dobro do espaço físico.
+
+O maior pico de uso esperado ocorre no primeiro treinamento, quando o checkpoint base LibriTTS ainda é necessário. Depois que o primeiro checkpoint da voz é enviado com sucesso, o checkpoint base é removido. Nas execuções seguintes, `best_model.pth` é restaurado e o checkpoint base não é baixado.
+
+Mensagens com prefixo `[DISCO]` mostram o espaço usado e livre no início, antes do treino, depois da limpeza dos intermediários, após falhas de upload e após a sincronização final.
+
 ## Modificações Realizadas
 - [x] Criação de `super_voz.md`.
 - [x] Upgrade do `limpeza_ia.py` para a **Versão 8** (Explicit Loading + CPU Fallback).
@@ -183,6 +237,8 @@ O StyleTTS2 pode registrar as linhas de progresso apenas em `Models/super_Voz/tr
 - [x] Barra compacta de progresso durante o treinamento.
 - [x] Espelhamento do progresso de `train.log` no console do Kaggle.
 - [x] Salvamento de checkpoint a cada epoca (`save_freq: 1`).
+- [x] Persistência do pacote completo da voz em Hugging Face Bucket.
+- [x] Retenção de apenas um checkpoint local após upload confirmado.
 
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE
 O ambiente do Colab e Kaggle **clona este repositório do GitHub**. 

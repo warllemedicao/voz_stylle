@@ -52,3 +52,115 @@
 - `run_kaggle_oneclick.py` também define a variável como `1`.
 - `scripts/run_kaggle_styletts2.py` força `SUPER_VOZ_ENABLE_RESEMBLE=1` quando `enable_resemble_enhance: true` no YAML.
 - Com o enhancer habilitado, o runner chama `limpeza_ia.py --enhancer resemble`, evitando que `--enhancer auto` respeite um valor antigo `0` herdado do ambiente.
+
+## [2026-06-04] Pesquisa: diagnóstico seguro e ferramentas gratuitas para limpeza estilo Auphonic
+
+Objetivo da pesquisa: evoluir o `limpeza_ia.py` para escolher a menor intervenção possível por arquivo, preservando identidade vocal para treino StyleTTS2. A conclusão principal é que não devemos aplicar uma cadeia pesada em todos os áudios. O fluxo mais seguro é medir o defeito dominante, escolher uma ferramenta específica e validar a saída antes de aceitar o arquivo processado.
+
+### Referências pesquisadas
+
+- Auphonic usa a estratégia de análise automática antes do processamento: Adaptive Leveler, loudness normalization, noise/hum reduction, filtering e speech recognition. Referências:
+  - https://eu1.auphonic.com/help/
+  - https://us1.auphonic.com/help/algorithms/singletrack.html
+  - https://auphonic.com/pricing
+- DNSMOS é métrica não intrusiva para avaliar qualidade de fala e ruído, com notas para `SIG`, `BAK` e `OVRL`. Referência:
+  - https://arxiv.org/abs/2110.01763
+- NISQA é alternativa não intrusiva para MOS e qualidade perceptual de fala/TTS. Referências:
+  - https://github.com/gabrielmittag/NISQA
+  - https://arxiv.org/abs/2304.09226
+- FFmpeg `ebur128`/`loudnorm` mede loudness integrado, LRA e true peak; isso é melhor que normalizar apenas pico/RMS. Referências:
+  - https://ffmpeg.org/ffmpeg-filters.html#ebur128
+  - https://ffmpeg.org/ffmpeg-filters.html#loudnorm
+  - https://github.com/slhck/ffmpeg-normalize
+- Silero VAD e pyannote.audio são opções para detectar presença de fala, silêncio, sobreposição e segmentação. Referências:
+  - https://github.com/snakers4/silero-vad
+  - https://github.com/pyannote/pyannote-audio
+- ClipDetect detecta clipping mesmo quando o áudio já foi normalizado depois da distorção. Referência:
+  - https://pypi.org/project/clipdetect/
+- DeepFilterNet, RNNoise, Resemble Enhance, Demucs, noisereduce, Pedalboard, VoiceFixer e ClearerVoice-Studio são candidatos gratuitos/open source para tratamentos específicos. Referências:
+  - https://github.com/Rikorose/DeepFilterNet
+  - https://github.com/xiph/rnnoise
+  - https://github.com/resemble-ai/resemble-enhance
+  - https://github.com/facebookresearch/demucs
+  - https://github.com/timsainb/noisereduce
+  - https://github.com/spotify/pedalboard
+  - https://github.com/haoheliu/voicefixer
+  - https://github.com/modelscope/ClearerVoice-Studio
+
+### Estratégia recomendada
+
+1. **Análise antes de restaurar**
+   - Medir `DNSMOS` como já fazemos, mantendo `sig`, `bak` e `ovrl`.
+   - Adicionar opcionalmente `NISQA` para uma segunda opinião de MOS quando houver GPU/tempo.
+   - Medir clipping com `clipdetect` ou heurística própria de amostras saturadas/platôs.
+   - Medir LUFS, LRA e true peak com FFmpeg `ebur128` ou `loudnorm`.
+   - Medir fala/silêncio com Silero VAD; para casos avançados, pyannote.audio pode detectar sobreposição ou troca de falante.
+   - Medir espectro com `librosa`: excesso acima de 8 kHz indica chiado; baixa energia acima de 4-6 kHz pode indicar áudio telefônico/baixa banda; flatness alta sugere ruído de fundo.
+
+2. **Escolher uma ferramenta por defeito dominante**
+   - Não aplicar Demucs, denoise, enhancer, compressor e loudnorm em cadeia pesada por padrão.
+   - Aplicar tratamento único ou curto, conforme defeito principal.
+   - Preservar original quando a análise indicar áudio já bom.
+
+3. **Validar depois do tratamento**
+   - Recalcular duração, RMS, pico, true peak, LUFS e DNSMOS.
+   - Rejeitar saída com duração muito alterada, RMS anormal, pico excessivo, clipping novo, queda de MOS ou transcrição claramente pior.
+   - Se reprovar, copiar original e aplicar apenas padronização final segura para StyleTTS2.
+
+### Matriz de decisão sugerida
+
+| Defeito detectado | Indicadores | Ferramenta preferida | Alternativa | Risco para a voz | Observação |
+|---|---|---|---|---|---|
+| Áudio bom | DNSMOS alto, sem clipping, LUFS aceitável, VAD estável | Preservar original | Padronização 24 kHz/mono/PCM16 | Baixo | Melhor não restaurar áudio que já serve para treino. |
+| Ruído estacionário leve | `bak` baixo, flatness moderada, sem voz degradada | DeepFilterNet | RNNoise | Baixo/médio | Menos agressivo que enhancer completo; bom para ventilador, hiss leve e ambiente constante. |
+| Ruído estacionário forte | `bak` muito baixo, hissing alto | Resemble `denoise` | DeepFilterNet forte | Médio | Validar se fricativas e respirações naturais não foram apagadas. |
+| Voz degradada | `ovrl` e `sig` baixos, sem música dominante | Resemble `enhance` | VoiceFixer | Médio/alto | Pode alterar timbre; usar só quando o ganho de qualidade justificar. |
+| Áudio telefônico/baixa banda | sample rate baixo, baixa energia em alta frequência | Resemble `enhance` | ClearerVoice super-resolution | Alto | Pode "inventar" brilho; validar identidade vocal com cuidado. |
+| Música ou fundo musical | detecção de música/energia harmônica persistente | Demucs vocals-only | ClearerVoice separation | Alto | Usar só quando a voz está misturada com música; Demucs pode criar artefatos. |
+| Várias vozes/sobreposição | pyannote indica overlapped speech ou speaker change frequente | Rejeitar/filtrar trecho | pyannote segmentation | Baixo | Para treinar uma voz neural, é melhor remover trechos com outro falante do que tentar reparar. |
+| Silêncio longo/pausas | VAD mostra muita ausência de fala | Trim por VAD/librosa | FFmpeg silenceremove | Baixo | Não cortar pausas internas naturais demais; apenas bordas e silêncios excessivos. |
+| Clipping/distorção | clipdetect positivo, platôs no waveform, true peak alto | Rejeitar se severo | VoiceFixer/declipping experimental | Alto | Clipping severo não é "limpeza"; pode contaminar o treino. |
+| Volume inconsistente | LUFS muito baixo/alto, LRA alto, sem ruído grave | ffmpeg-normalize/loudnorm | Pedalboard compressor/limiter | Baixo/médio | Preferir LUFS real a normalização por pico. |
+| Sibilância/chiado agudo | excesso espectral acima de 8 kHz | DeepFilterNet ou de-esser leve via Pedalboard/EQ | Resemble denoise | Médio | Evitar apagar `s`, `f`, brilho natural da voz. |
+| Reverb/sala | MOS baixo, cauda espectral, fala distante | ClearerVoice/VoiceFixer experimental | Resemble enhance | Alto | Dereverb é arriscado para identidade vocal; só em modo opcional. |
+
+### Stack gratuita recomendada por prioridade
+
+1. **FFmpeg `ebur128`/`loudnorm` ou `ffmpeg-normalize`**
+   - Prioridade alta porque o script atual normaliza amplitude, mas ainda não faz LUFS real.
+   - Deve entrar no final, depois de qualquer restauração, com true peak conservador.
+
+2. **DeepFilterNet**
+   - Melhor candidato para denoise principal gratuito sem depender de uma restauração tão agressiva.
+   - Bom para ruído de fundo e chiado quando a voz ainda está preservada.
+
+3. **Silero VAD**
+   - Leve e útil para medir proporção de fala, cortar bordas silenciosas e evitar amplificar ruído em trechos sem fala.
+
+4. **ClipDetect ou detector próprio de clipping**
+   - Importante para impedir que áudio irrecuperável entre no dataset.
+   - Clipping severo deve marcar o arquivo para rejeição, não para enhancement automático.
+
+5. **Pedalboard**
+   - Útil para high-pass, compressor, limiter e EQ leve, imitando parte do nivelamento estilo Auphonic.
+   - Deve ser usado com parâmetros conservadores.
+
+6. **Demucs**
+   - Já é instalado no runner, mas não deve ser padrão.
+   - Usar apenas quando houver música/fundo musical claro.
+
+7. **NISQA**
+   - Boa segunda métrica de qualidade, especialmente para TTS/naturalidade.
+   - Pode ser opcional por custo de instalação/execução.
+
+8. **ClearerVoice-Studio e VoiceFixer**
+   - Bons candidatos para modo pesado/experimental.
+   - Devem ficar atrás de uma flag porque podem alterar timbre e naturalidade.
+
+### Regra de preservação da identidade vocal
+
+- Se o áudio for aceitável, preservar.
+- Se o defeito for leve, aplicar ferramenta leve.
+- Se o defeito for grave, tentar ferramenta pesada apenas uma vez.
+- Se a saída piorar qualquer métrica crítica ou parecer alterar a duração/timbre, descartar a saída processada.
+- Para treino StyleTTS2, é melhor ter menos arquivos bons do que muitos arquivos artificialmente restaurados com identidade vocal instável.

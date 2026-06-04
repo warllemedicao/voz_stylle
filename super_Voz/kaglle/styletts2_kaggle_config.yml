@@ -5,16 +5,31 @@ project_subdir: "super_Voz"
 
 styletts2_repo: "https://github.com/yl4579/StyleTTS2.git"
 styletts2_dir: "/kaggle/working/StyleTTS2"
+voice_package_dir: "minha_voz_styletts2"
 output_dir: "/kaggle/working/super_Voz_outputs"
 r2_sync_interval_seconds: 600
 enable_resemble_enhance: true
+# Remove Audios_brutos e Audios_processados depois que o dataset final e o pacote forem criados.
+cleanup_intermediate_audio: true
+# Remove o dataset preparado de uma execucao anterior antes de gerar o dataset atual.
+cleanup_previous_dataset: true
+
+# Persistencia dos checkpoints e artefatos em Hugging Face Buckets.
+# Crie um Kaggle Secret chamado HF_TOKEN com permissao de escrita no bucket.
+huggingface:
+  enabled: true
+  # Aborta antes do treino se o bucket/token nao estiver acessivel, evitando acumular checkpoints locais.
+  required: true
+  token_env: "HF_TOKEN"
+  bucket_uri: "hf://buckets/warllem/Super_voz"
+  sync_interval_seconds: 60
 
 # Persistencia opcional via TeraBox.
 # Recomendado: use Kaggle Secrets. Para o modo padrao abaixo, crie:
 # TERABOX_NDUS, TERABOX_JS_TOKEN, TERABOX_CSRF_TOKEN, TERABOX_BROWSER_ID e TERABOX_NDUT_FMT.
 # Como nao existe CLI oficial estavel do TeraBox, o upload usa um wrapper configuravel.
 terabox:
-  enabled: true
+  enabled: false
   ndus_env: "TERABOX_NDUS"
   cookie_ndus: ""
   cli_path: "/kaggle/working/TeraboxUploaderCLI"
@@ -24,7 +39,8 @@ terabox:
   restore_share_password: "voz1"
   local_styletts2_dir: "/kaggle/working/StyleTTS2"
   sync_interval_seconds: 600
-  keep_visible_outputs: true
+  # Copiar tudo para outra pasta duplica o uso de disco no Kaggle.
+  keep_visible_outputs: false
   visible_output_dir: "/kaggle/working/super_voz_resultados"
   required_env:
     - "TERABOX_NDUS"

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
@@ -234,6 +235,37 @@ def count_files(path: Path, allowed=None) -> int:
         if item.is_file() and (allowed is None or allowed(item)):
             total += 1
     return total
+
+
+def format_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def report_working_disk(label: str, working_dir: Path = Path("/kaggle/working")) -> None:
+    target = working_dir if working_dir.exists() else Path.cwd()
+    usage = shutil.disk_usage(target)
+    percent = usage.used / usage.total * 100 if usage.total else 0
+    print(
+        f"[DISCO] {label}: usado {format_bytes(usage.used)} de {format_bytes(usage.total)} "
+        f"({percent:.1f}%), livre {format_bytes(usage.free)} em {target}"
+    )
+
+
+def cleanup_intermediate_audio(cfg: dict, local_raw: Path, local_processed: Path) -> None:
+    if not cfg.get("cleanup_intermediate_audio", True):
+        print("[DISCO] Limpeza de audios intermediarios desativada por configuracao.")
+        return
+
+    for path in [local_raw, local_processed]:
+        if not path.exists():
+            continue
+        shutil.rmtree(path)
+        print(f"[DISCO] Pasta intermediaria removida apos preparar o pacote: {path}")
 
 
 def load_r2_env_defaults(r2_cfg: dict) -> dict:
@@ -691,6 +723,290 @@ def start_periodic_terabox_checkpoint_sync(
     return stop_event, thread
 
 
+def setup_huggingface(cfg: dict) -> dict | None:
+    hf_cfg = cfg.get("huggingface", {}) or {}
+    if not hf_cfg.get("enabled"):
+        return None
+
+    token_env = str(hf_cfg.get("token_env", "HF_TOKEN"))
+    token = os.environ.get(token_env, "")
+    bucket_uri = str(hf_cfg.get("bucket_uri", "")).strip().rstrip("/")
+    if not token or not bucket_uri.startswith("hf://buckets/"):
+        message = f"Configure o secret {token_env} e huggingface.bucket_uri para ativar o upload."
+        if hf_cfg.get("required", False):
+            raise RuntimeError("[HuggingFace] " + message)
+        print("[HuggingFace][AVISO] " + message)
+        return None
+
+    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "huggingface_hub"])
+    if shutil.which("hf") is None:
+        message = "O comando hf nao ficou disponivel; sincronizacao desativada."
+        if hf_cfg.get("required", False):
+            raise RuntimeError("[HuggingFace] " + message)
+        print("[HuggingFace][AVISO] " + message)
+        return None
+
+    os.environ["HF_TOKEN"] = token
+    hf_cfg["_sync_lock"] = threading.Lock()
+    print(f"[HuggingFace] Bucket configurado: {bucket_uri}")
+    return hf_cfg
+
+
+def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
+    if not hf_cfg:
+        return False
+
+    package_dir.mkdir(parents=True, exist_ok=True)
+    result = run(
+        ["hf", "sync", str(hf_cfg["bucket_uri"]), str(package_dir)],
+        check=False,
+    )
+    if result.returncode == 0:
+        print(f"[HuggingFace] Pacote restaurado em {package_dir}.")
+        return True
+    print("[HuggingFace][AVISO] Nao foi possivel restaurar o bucket; o treino continuara sem estado remoto.")
+    return False
+
+
+def prune_uploaded_checkpoints(checkpoint_dir: Path, uploaded_checkpoint: Path) -> int:
+    checkpoints = sorted(checkpoint_dir.glob("epoch_2nd_*.pth"))
+    removed = 0
+    for path in checkpoints:
+        if path.name > uploaded_checkpoint.name:
+            continue
+        path.unlink()
+        removed += 1
+        print(f"[DISCO] Checkpoint local antigo removido apos upload: {path.name}")
+    return removed
+
+
+def remove_pretrained_base_after_finetune_upload(style_dir: Path) -> None:
+    base_checkpoint = style_dir / "Models" / "LibriTTS" / "epochs_2nd_00020.pth"
+    if not base_checkpoint.exists():
+        return
+    base_checkpoint.unlink()
+    print(f"[DISCO] Checkpoint base removido apos persistir a voz treinada: {base_checkpoint}")
+
+
+def replace_with_hardlink_or_copy(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    temp = dst.with_suffix(dst.suffix + ".tmp")
+    temp.unlink(missing_ok=True)
+    try:
+        os.link(src, temp)
+    except OSError:
+        shutil.copy2(src, temp)
+    temp.replace(dst)
+
+
+def copy_if_exists(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        return False
+    if src.is_dir():
+        if not dst.exists():
+            shutil.copytree(src, dst)
+    else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    return True
+
+
+def hardlink_tree(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        return False
+    for path in src.rglob("*"):
+        if not path.is_file():
+            continue
+        target = dst / path.relative_to(src)
+        replace_with_hardlink_or_copy(path, target)
+    return True
+
+
+def materialize_voice_package(
+    package_dir: Path,
+    style_dir: Path,
+    dataset_dir: Path,
+    processed_dir: Path,
+    project_dir: Path,
+    config_path: Path,
+    cfg: dict,
+) -> Path | None:
+    latest = latest_finetune_checkpoint(style_dir)
+    model_dir = package_dir / "model"
+    data_dir = package_dir / "data_reference"
+    docs_dir = package_dir / "docs"
+    outputs_dir = package_dir / "outputs"
+    for path in [model_dir, data_dir, package_dir / "tokenizer", package_dir / "inference", docs_dir, outputs_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+    (model_dir / "vocoder").mkdir(parents=True, exist_ok=True)
+
+    if latest:
+        replace_with_hardlink_or_copy(latest, model_dir / "best_model.pth")
+    copy_if_exists(config_path, model_dir / "config.yml")
+    (model_dir / "vocoder" / "README.txt").write_text(
+        "O decoder/vocoder do StyleTTS2 esta incorporado em model/best_model.pth.\n",
+        encoding="utf-8",
+    )
+
+    auxiliary = {
+        style_dir / "Utils" / "ASR": model_dir / "Utils" / "ASR",
+        style_dir / "Utils" / "JDC": model_dir / "Utils" / "JDC",
+        style_dir / "Utils" / "PLBERT": model_dir / "Utils" / "PLBERT",
+    }
+    missing_aux = [
+        str(src.relative_to(style_dir))
+        for src, dst in auxiliary.items()
+        if not hardlink_tree(src, dst)
+    ]
+
+    for name in ["train_list.txt", "val_list.txt", "all_list.txt"]:
+        copy_if_exists(dataset_dir / "Data" / name, data_dir / name)
+    package_wavs = data_dir / "wavs"
+    if package_wavs.exists():
+        shutil.rmtree(package_wavs)
+    hardlink_tree(dataset_dir / "wavs", package_wavs)
+    metadata = processed_dir / "train.txt"
+    if not metadata.exists():
+        metadata = processed_dir / "metadata.csv"
+    copy_if_exists(metadata, data_dir / "metadata.csv")
+
+    wavs = sorted((dataset_dir / "wavs").glob("*.wav"))
+    if wavs:
+        replace_with_hardlink_or_copy(wavs[0], data_dir / "referencia_voz.wav")
+
+    (package_dir / "tokenizer" / "phonemizer_config.txt").write_text(
+        f"phonemize={cfg.get('phonemize', True)}\n"
+        f"language={cfg.get('phonemizer_language', 'pt-br')}\n"
+        "PLBERT=model/Utils/PLBERT\n",
+        encoding="utf-8",
+    )
+    copy_if_exists(style_dir / "requirements.txt", package_dir / "inference" / "requirements.txt")
+    copy_if_exists(style_dir / "Models" / "super_Voz" / "train.log", docs_dir / "train.log")
+    for name in ["Inference_LibriTTS.ipynb", "Inference_LJSpeech.ipynb"]:
+        copy_if_exists(style_dir / "Demo" / name, package_dir / "inference" / name)
+    for name in ["inference.py", "exemplo_uso.py"]:
+        copy_if_exists(project_dir / "inference" / name, package_dir / "inference" / name)
+
+    sample_candidates = sorted(Path(cfg.get("output_dir", "/kaggle/working/super_Voz_outputs")).rglob("*.wav"))
+    if sample_candidates:
+        copy_if_exists(sample_candidates[0], outputs_dir / "amostras_geradas.wav")
+
+    report = dataset_dir / "prepare_report.txt"
+    params = [
+        f"{key}={value}"
+        for key, value in sorted(cfg.items())
+        if isinstance(value, (str, int, float, bool))
+    ]
+    if report.exists():
+        params.extend(["", report.read_text(encoding="utf-8", errors="replace")])
+    (docs_dir / "parametros_treinamento.txt").write_text("\n".join(params) + "\n", encoding="utf-8")
+    (docs_dir / "dataset_usado.txt").write_text(
+        f"processed_dir={processed_dir}\ndataset_dir={dataset_dir}\n"
+        f"reference={data_dir / 'referencia_voz.wav'}\n",
+        encoding="utf-8",
+    )
+    observations = [
+        "Pacote gerado automaticamente pelo pipeline super_Voz.",
+        "O StyleTTS2 nao usa um vocoder externo separado; o decoder/vocoder treinado esta no checkpoint.",
+        "Para inferencia, mantenha os pesos auxiliares ASR, JDC e PLBERT junto do config.yml.",
+        "data_reference/wavs foi incluido porque train_list.txt e val_list.txt dependem desses audios para retomar o treino.",
+        "O projeto oficial StyleTTS2 fornece notebooks de inferencia, nao um inference.py oficial.",
+        f"Codigo StyleTTS2 necessario para inferencia: {cfg.get('styletts2_repo', 'https://github.com/yl4579/StyleTTS2.git')}",
+    ]
+    if missing_aux:
+        observations.append("Pesos auxiliares ausentes: " + ", ".join(missing_aux))
+    if not (package_dir / "inference" / "inference.py").exists():
+        observations.append("inference.py nao existe no projeto; adicione um script de inferencia compativel antes de distribuir o pacote.")
+    if not sample_candidates:
+        observations.append("Nenhuma amostra gerada foi encontrada para outputs/amostras_geradas.wav.")
+    (docs_dir / "observacoes.txt").write_text("\n".join(observations) + "\n", encoding="utf-8")
+
+    return latest
+
+
+def huggingface_sync_package(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    style_dir: Path,
+    dataset_dir: Path,
+    processed_dir: Path,
+    project_dir: Path,
+    config_path: Path,
+    cfg: dict,
+) -> bool:
+    if not hf_cfg:
+        materialize_voice_package(
+            package_dir, style_dir, dataset_dir, processed_dir, project_dir, config_path, cfg
+        )
+        return False
+
+    lock = hf_cfg["_sync_lock"]
+    if not lock.acquire(blocking=False):
+        return False
+    try:
+        latest = materialize_voice_package(
+            package_dir, style_dir, dataset_dir, processed_dir, project_dir, config_path, cfg
+        )
+        result = run(
+            ["hf", "sync", str(package_dir), str(hf_cfg["bucket_uri"]), "--delete"],
+            check=False,
+        )
+        if result.returncode != 0:
+            print("[HuggingFace][AVISO] Upload do pacote falhou; checkpoints locais foram preservados.")
+            report_working_disk("upload Hugging Face falhou")
+            return False
+        print(f"[HuggingFace] Pacote sincronizado: {package_dir} -> {hf_cfg['bucket_uri']}")
+        if latest and latest.parent.name == "super_Voz":
+            prune_uploaded_checkpoints(style_dir / "Models" / "super_Voz", latest)
+            remove_pretrained_base_after_finetune_upload(style_dir)
+        return True
+    finally:
+        lock.release()
+
+
+def start_periodic_huggingface_package_sync(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    style_dir: Path,
+    dataset_dir: Path,
+    processed_dir: Path,
+    project_dir: Path,
+    config_path: Path,
+    cfg: dict,
+    interval_seconds: int,
+) -> tuple[threading.Event, threading.Thread] | tuple[None, None]:
+    if not hf_cfg:
+        return None, None
+
+    stop_event = threading.Event()
+
+    def worker() -> None:
+        last_checkpoint = None
+        last_sync = time.monotonic()
+        while not stop_event.wait(5):
+            latest = latest_finetune_checkpoint(style_dir)
+            checkpoint_state = None
+            if latest and latest.parent.name == "super_Voz":
+                stat = latest.stat()
+                checkpoint_state = (latest.name, stat.st_size, stat.st_mtime_ns)
+            due_for_log = time.monotonic() - last_sync >= interval_seconds
+            if checkpoint_state == last_checkpoint and not due_for_log:
+                continue
+            if huggingface_sync_package(
+                hf_cfg, package_dir, style_dir, dataset_dir, processed_dir, project_dir, config_path, cfg
+            ):
+                last_checkpoint = checkpoint_state
+                last_sync = time.monotonic()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    print(
+        "[HuggingFace] Monitor de checkpoints ativo a cada 5s; "
+        f"logs sincronizados no maximo a cada {interval_seconds}s."
+    )
+    return stop_event, thread
+
+
 def start_periodic_checkpoint_sync(
     s3,
     bucket,
@@ -766,8 +1082,11 @@ def download_pretrained(style_dir: Path) -> Path:
 
 def latest_finetune_checkpoint(style_dir: Path) -> Path | None:
     ckpt_dir = style_dir / "Models" / "super_Voz"
-    checkpoints = sorted(ckpt_dir.glob("epoch_2nd_*.pth"))
-    return checkpoints[-1] if checkpoints else None
+    checkpoints = sorted(path for path in ckpt_dir.glob("epoch_2nd_*.pth") if zipfile.is_zipfile(path))
+    if checkpoints:
+        return checkpoints[-1]
+    packaged = style_dir / "minha_voz_styletts2" / "model" / "best_model.pth"
+    return packaged if packaged.exists() else None
 
 
 def patch_styletts2_config(style_dir: Path, dataset_dir: Path, cfg: dict) -> Path:
@@ -900,9 +1219,13 @@ def sync_outputs(style_dir: Path, dataset_dir: Path, cfg: dict, s3=None, bucket=
     print("\n" + "="*60)
     print(" ✅ TREINO FINALIZADO!")
     print("="*60)
-    print(f"Checkpoints em: {style_dir / 'Models' / 'super_Voz'}")
+    print(f"Pacote da voz em: {style_dir / str(cfg.get('voice_package_dir', 'minha_voz_styletts2'))}")
     print(f"Dataset preparado em: {dataset_dir}")
-    materialize_visible_outputs(style_dir, dataset_dir, cfg)
+    try:
+        materialize_visible_outputs(style_dir, dataset_dir, cfg)
+    except OSError as exc:
+        print(f"[OUTPUTS][AVISO] Nao foi possivel materializar copias para download: {exc}")
+        print("Os arquivos originais continuam em /kaggle/working/StyleTTS2/Models/super_Voz.")
     r2_cfg = cfg.get("cloudflare_r2", {})
     if r2_cfg.get("disable_r2_uploads"):
         print("Nota: upload/sync R2 desativado por disable_r2_uploads=true; downloads R2 continuam permitidos.")
@@ -928,7 +1251,7 @@ def materialize_visible_outputs(style_dir: Path, dataset_dir: Path, cfg: dict) -
     output_root.mkdir(parents=True, exist_ok=True)
 
     items = {
-        style_dir / "Models" / "super_Voz": output_root / "checkpoints",
+        style_dir / str(cfg.get("voice_package_dir", "minha_voz_styletts2")): output_root / "minha_voz_styletts2",
         dataset_dir: output_root / "dataset_styletts2",
         Path(cfg.get("output_dir", "/kaggle/working/super_Voz_outputs")): output_root / "outputs",
     }
@@ -963,6 +1286,7 @@ def main() -> int:
     project_dir = code_dir
     data_root = Path(cfg.get("repo_dir", str(repo_dir))).resolve()
     data_root.mkdir(parents=True, exist_ok=True)
+    report_working_disk("inicio do pipeline")
 
     # Configuração de memória
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -979,9 +1303,14 @@ def main() -> int:
 
     style_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2"))
     clone_or_pull(cfg.get("styletts2_repo", "https://github.com/yl4579/StyleTTS2.git"), style_dir)
+    package_dir = style_dir / str(cfg.get("voice_package_dir", "minha_voz_styletts2"))
 
     restore_styletts2_from_candidates(cfg, style_dir)
     terabox_cfg = setup_terabox(cfg)
+    huggingface_cfg = setup_huggingface(cfg)
+    restored_hf = huggingface_restore_package(huggingface_cfg, package_dir)
+    if huggingface_cfg and huggingface_cfg.get("required", False) and not restored_hf:
+        raise RuntimeError("[HuggingFace] Nao foi possivel acessar o bucket obrigatorio antes do treino.")
 
     patch_pytorch_compatibility(style_dir)
     patch_styletts2_oom_safety(style_dir)
@@ -1047,6 +1376,9 @@ def main() -> int:
     ], cwd=project_dir)
 
     dataset_dir = Path("/kaggle/working/super_Voz_styletts2_data")
+    if cfg.get("cleanup_previous_dataset", True) and dataset_dir.exists():
+        shutil.rmtree(dataset_dir)
+        print(f"[DISCO] Dataset preparado de execucao anterior removido: {dataset_dir}")
     prepare_cmd = [
         sys.executable,
         str(project_dir / "scripts" / "prepare_styletts2_dataset.py"),
@@ -1067,13 +1399,32 @@ def main() -> int:
     for name in ["train_list.txt", "val_list.txt", "OOD_texts.txt"]:
         shutil.copy2(dataset_dir / "Data" / name, style_dir / "Data" / name)
 
-    pretrained = download_pretrained(style_dir)
+    if latest_finetune_checkpoint(style_dir):
+        print("[DISCO] Checkpoint da voz restaurado; download do checkpoint base LibriTTS pulado.")
+    else:
+        download_pretrained(style_dir)
     config_path = patch_styletts2_config(style_dir, dataset_dir, cfg)
+    initial_hf_sync = huggingface_sync_package(
+        huggingface_cfg,
+        package_dir,
+        style_dir,
+        dataset_dir,
+        local_processed,
+        project_dir,
+        config_path,
+        cfg,
+    )
+    if huggingface_cfg and huggingface_cfg.get("required", False) and not initial_hf_sync:
+        raise RuntimeError("[HuggingFace] Nao foi possivel validar o upload do pacote antes do treino.")
+    cleanup_intermediate_audio(cfg, local_raw, local_processed)
+    report_working_disk("apos remover audios intermediarios")
 
     sync_stop = None
     sync_thread = None
     tb_sync_stop = None
     tb_sync_thread = None
+    hf_sync_stop = None
+    hf_sync_thread = None
     checkpoint_state = None
     r2_cfg = cfg.get("cloudflare_r2", {})
     output_prefix = None if r2_cfg.get("disable_r2_uploads") else r2_cfg.get("output_prefix")
@@ -1093,9 +1444,23 @@ def main() -> int:
             style_dir,
             max(60, tb_interval_seconds),
         )
+    if huggingface_cfg:
+        hf_interval_seconds = int(huggingface_cfg.get("sync_interval_seconds", 60))
+        hf_sync_stop, hf_sync_thread = start_periodic_huggingface_package_sync(
+            huggingface_cfg,
+            package_dir,
+            style_dir,
+            dataset_dir,
+            local_processed,
+            project_dir,
+            config_path,
+            cfg,
+            max(15, hf_interval_seconds),
+        )
 
     try:
         if not args.skip_train:
+            report_working_disk("antes do treinamento")
             run_training_with_progress([
                 "accelerate", "launch",
                 "--mixed_precision=fp16",
@@ -1110,10 +1475,24 @@ def main() -> int:
         if tb_sync_stop and tb_sync_thread:
             tb_sync_stop.set()
             tb_sync_thread.join(timeout=30)
+        if hf_sync_stop and hf_sync_thread:
+            hf_sync_stop.set()
+            hf_sync_thread.join(timeout=30)
         terabox_upload_checkpoints(terabox_cfg, style_dir)
+        huggingface_sync_package(
+            huggingface_cfg,
+            package_dir,
+            style_dir,
+            dataset_dir,
+            local_processed,
+            project_dir,
+            config_path,
+            cfg,
+        )
+        report_working_disk("apos sincronizacao final")
         sync_outputs(style_dir, dataset_dir, cfg, s3, bucket, checkpoint_state)
 
-    print("\n✅ Treino finalizado! Checkpoints em:", style_dir / "Models" / "super_Voz")
+    print("\n✅ Treino finalizado! Pacote da voz em:", package_dir)
     return 0
 
 
