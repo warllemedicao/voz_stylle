@@ -15,6 +15,9 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 ## Fluxo do notebook
 
 1. Clona ou atualiza `https://github.com/warllemedicao/voz_stylle.git` em `/kaggle/working/Super_voz`.
+   - Se o GitHub/DNS falhar, reutiliza o clone local quando ele ja contem `super_Voz/kaglle/scripts/run_kaggle_styletts2.py`.
+   - Se nao houver clone local valido, procura uma copia anexada em `/kaggle/input` e copia para `/kaggle/working/Super_voz`.
+   - Se nao houver internet nem copia local/dataset com o codigo, falha com uma mensagem explicando para ativar Internet no Kaggle ou anexar um Kaggle Dataset com o projeto.
 2. Localiza `run_kaggle_styletts2.py` dentro de `super_Voz/kaglle/scripts`.
 3. Entra em `/kaggle/working/Super_voz/super_Voz/kaglle`.
 4. Gera `styletts2_kaggle_sem_cloudflare.yml`, mantendo download R2 permitido e bloqueando upload R2.
@@ -23,6 +26,26 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 ```bash
 python -u scripts/run_kaggle_styletts2.py --config styletts2_kaggle_sem_cloudflare.yml
 ```
+
+## Correcao do erro `Could not resolve host: github.com`
+
+O erro atual foi:
+
+```text
+fatal: unable to access 'https://github.com/warllemedicao/voz_stylle.git/': Could not resolve host: github.com
+CalledProcessError: Command '['git', 'clone', 'https://github.com/warllemedicao/voz_stylle.git', '/kaggle/working/Super_voz']' returned non-zero exit status 128.
+```
+
+A causa foi a correcao anterior que trocou o repositorio antigo por `https://github.com/warllemedicao/voz_stylle.git` e passou a executar `git clone` com `check=True` quando `/kaggle/working/Super_voz` nao existia. Isso resolveu o clone do repositorio errado, mas deixou o bootstrap fragil quando o Kaggle esta sem Internet ativada ou com falha temporaria de DNS.
+
+Correcao aplicada:
+
+- `run_kaggle_styletts2.ipynb` e `run_kaggle_oneclick.py` agora capturam falha de `git clone`/`git fetch`.
+- Se ja existir `/kaggle/working/Super_voz` com o runner Kaggle correto, o notebook continua usando esse clone mesmo sem GitHub.
+- Se nao existir clone em `/kaggle/working`, o bootstrap procura em `/kaggle/input` uma copia anexada como Kaggle Dataset contendo `super_Voz/kaglle/scripts/run_kaggle_styletts2.py` e copia para `/kaggle/working/Super_voz`.
+- Se nenhuma dessas fontes existir, a falha passa a explicar a acao necessaria: ativar Internet no Kaggle ou anexar um dataset com o codigo do projeto.
+
+Para executar a versao mais recente diretamente do GitHub, mantenha **Settings -> Internet** ativado no notebook Kaggle. Para executar sem internet, anexe um Kaggle Dataset contendo este repositorio.
 
 ## Correcao do erro de runner nao encontrado
 
