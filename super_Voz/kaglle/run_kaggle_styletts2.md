@@ -98,10 +98,15 @@ pacote antes do treino e sincroniza `/kaggle/working/StyleTTS2/minha_voz_stylett
 o treino. Depois de um upload confirmado, remove os `epoch_2nd_*.pth` de
 `Models/super_Voz`, mantendo somente `model/best_model.pth` no pacote local.
 
+O notebook carrega esse secret com `kaggle_secrets.UserSecretsClient` e grava em
+`os.environ`. O runner tambem faz fallback direto para `UserSecretsClient().get_secret("HF_TOKEN")`
+quando `HF_TOKEN` nao estiver no ambiente. Assim, o script tambem funciona quando for chamado
+diretamente no Kaggle, desde que o secret exista com esse label exato.
+
 Nesta configuracao, o bucket e obrigatorio. Se `HF_TOKEN` estiver ausente ou o bucket nao
-puder ser acessado, o treino aborta antes de gerar checkpoints. O runner verifica novos
-checkpoints a cada 5 segundos, remove apenas os checkpoints que ja foram enviados e preserva
-qualquer checkpoint mais novo criado durante um upload.
+puder ser acessado/criado com `hf buckets create ... --exist-ok`, o treino aborta antes de
+gerar checkpoints. O runner verifica novos checkpoints a cada 5 segundos, remove apenas os
+checkpoints que ja foram enviados e preserva qualquer checkpoint mais novo criado durante um upload.
 
 Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` e
 `Audios_processados` depois que o dataset final e o pacote forem criados. O dataset preparado

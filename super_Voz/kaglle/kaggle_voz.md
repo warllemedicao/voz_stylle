@@ -202,10 +202,11 @@ A causa foi a config base do Kaggle ter ficado com `cloudflare_r2.endpoint_url` 
 
 Correcao aplicada:
 
-- `styletts2_kaggle_config.yml` voltou a trazer os dados nao-secretos de leitura: `endpoint_url`, `bucket_name` e `raw_audio_prefix`.
-- `access_key_id` e `secret_access_key` continuam vazios no Git de proposito. Eles devem vir dos Kaggle Secrets `R2_ACCESS_KEY_ID` e `R2_SECRET_ACCESS_KEY`.
+- `styletts2_kaggle_config.yml` deve continuar trazendo os dados de leitura do Cloudflare R2 usados pelo projeto, incluindo `endpoint_url`, `bucket_name` e `raw_audio_prefix`.
+- Nao remova a secao `cloudflare_r2` do YAML. No Kaggle, ela continua sendo a fonte principal para localizar os audios brutos no R2.
+- `access_key_id` e `secret_access_key` podem vir dos Kaggle Secrets `R2_ACCESS_KEY_ID` e `R2_SECRET_ACCESS_KEY` ou permanecer no YAML conforme a estrategia atual do projeto.
 - O notebook parou de imprimir erro para secrets opcionais de TeraBox e overrides opcionais de R2. Ele so marca como obrigatorios os dois secrets sensiveis de leitura R2.
-- O runner agora explica que, quando faltarem `access_key_id` ou `secret_access_key`, o download R2 precisa desses dois Kaggle Secrets. A trava `disable_r2_uploads: true` continua bloqueando apenas upload para Cloudflare; ela nao bloqueia o download dos audios.
+- O runner agora tenta preencher os campos ausentes primeiro por variaveis de ambiente e depois diretamente via `UserSecretsClient().get_secret(...)` com os labels aceitos. Se ainda faltarem `access_key_id` ou `secret_access_key`, ele explica que o download R2 precisa desses dois Kaggle Secrets. A trava `disable_r2_uploads: true` continua bloqueando apenas upload para Cloudflare; ela nao bloqueia o download dos audios.
 
 Se esses dois secrets R2 nao existirem no kernel Kaggle e tambem nao houver Kaggle Dataset com audios, o pipeline vai falhar corretamente por falta de entrada.
 
@@ -219,7 +220,7 @@ R2_SECRET_ACCESS_KEY
 R2_RAW_AUDIO_PREFIX
 ```
 
-O arquivo `styletts2_kaggle_config.yml` nao deve guardar access key ou secret key. Deixe esses campos vazios no YAML e use os Kaggle Secrets acima. O runner preenche a configuracao a partir das variaveis de ambiente carregadas pelo notebook.
+O runner preenche campos ausentes a partir das variaveis de ambiente carregadas pelo notebook ou, quando executado diretamente no Kaggle, via `kaggle_secrets.UserSecretsClient`. Use exatamente os labels acima nos Kaggle Secrets.
 
 ## TeraBox
 

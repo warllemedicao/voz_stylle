@@ -221,6 +221,67 @@ O maior pico de uso esperado ocorre no primeiro treinamento, quando o checkpoint
 
 Mensagens com prefixo `[DISCO]` mostram o espaço usado e livre no início, antes do treino, depois da limpeza dos intermediários, após falhas de upload e após a sincronização final.
 
+## Observação Operacional Cloudflare/Kaggle (05/06/2026)
+
+Não remova os dados do Cloudflare do arquivo YAML. No fluxo Kaggle atual, a seção
+`cloudflare_r2` do `styletts2_kaggle_config.yml` deve continuar contendo os dados
+necessários para leitura dos áudios brutos, incluindo `endpoint_url`, `bucket_name` e
+`raw_audio_prefix`. Esses dados permitem que o runner baixe novamente os áudios de entrada
+quando o Kaggle inicia uma sessão limpa.
+
+A regra operacional atual é:
+
+- Cloudflare R2 continua sendo fonte de entrada dos áudios brutos.
+- A configuração runtime do notebook pode bloquear upload para R2 com `disable_r2_uploads: true`.
+- Não apagar a seção `cloudflare_r2` do YAML, porque sem ela o pipeline depende apenas de Kaggle Input local.
+- Se as credenciais R2 forem usadas no YAML deste projeto, elas devem permanecer disponíveis para o Kaggle conforme a estratégia atual do projeto.
+
+## Leitura de Kaggle Secrets no Runner (05/06/2026)
+
+O runner Kaggle agora tambem tenta ler secrets diretamente com:
+
+```python
+from kaggle_secrets import UserSecretsClient
+UserSecretsClient().get_secret("NOME_DO_SECRET")
+```
+
+Isso vale para `HF_TOKEN` e para os aliases R2 aceitos, como `R2_ACCESS_KEY_ID` e
+`R2_SECRET_ACCESS_KEY`. A ordem de leitura e:
+
+1. usar a variavel ja existente em `os.environ`;
+2. se ela nao existir, tentar o Kaggle Secret com o mesmo label;
+3. se encontrar, gravar o valor em `os.environ` para as proximas etapas;
+4. se o secret obrigatorio ainda estiver ausente, falhar cedo com mensagem clara.
+
+Com isso, o notebook pode continuar carregando secrets antes do runner, mas o script tambem
+fica protegido quando for executado diretamente no Kaggle.
+
+## Simulação do Encerramento na Época 10 (05/06/2026)
+
+Foi informado que uma execução anterior treinou até a `epoch 10` e depois finalizou sozinha por causa de um erro. Pela leitura do runner Kaggle, a época 10 é um ponto sensível porque o YAML usa:
+
+```yaml
+diff_epoch: 10
+```
+
+Na configuração do StyleTTS2, `diff_epoch` normalmente marca a transição para uma fase mais pesada do treinamento, envolvendo partes adicionais do modelo/perdas. Portanto, uma simulação provável é:
+
+1. O treino rodou normalmente das épocas 1 a 10 com o conjunto inicial de perdas/modelos.
+2. Ao entrar na fase após `diff_epoch`, o StyleTTS2 passou a usar componentes mais pesados.
+3. Em GPU Kaggle limitada, como P100/T4, isso pode ter causado erro de CUDA, OOM, processo `Killed` ou falha ao carregar algum modelo auxiliar.
+4. O wrapper `run_training_with_progress()` detecta que o processo de treino saiu com código diferente de zero e levanta `CalledProcessError`.
+5. Mesmo com erro, o bloco `finally` do runner ainda tenta parar os monitores e sincronizar o pacote/checkpoint final com Hugging Face/TeraBox/R2, fazendo parecer que o notebook "finalizou sozinho".
+
+Hipóteses mais fortes para o erro na época 10:
+
+- transição do `diff_epoch: 10` aumentou uso de VRAM e causou OOM;
+- versão de dependência incompatível em etapa acionada só depois dessa época;
+- checkpoint ou modelo auxiliar ausente/corrompido, exigido apenas nessa fase;
+- falha de sincronização ou disco cheio durante materialização/upload do pacote após checkpoint;
+- validação ou dataloader com lote inválido ao mudar a fase de treino.
+
+Para confirmar, o trecho mais importante do log é o final de `Models/super_Voz/train.log` junto com as linhas do notebook logo antes de `CalledProcessError`, `CUDA out of memory`, `Killed`, `Traceback` ou `[HuggingFace][AVISO]`.
+
 ## Modificações Realizadas
 - [x] Criação de `super_voz.md`.
 - [x] Upgrade do `limpeza_ia.py` para a **Versão 8** (Explicit Loading + CPU Fallback).

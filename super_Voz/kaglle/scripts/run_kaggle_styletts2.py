@@ -256,6 +256,35 @@ def report_working_disk(label: str, working_dir: Path = Path("/kaggle/working"))
     )
 
 
+def get_kaggle_secret(secret_label: str, required: bool = False) -> str:
+    try:
+        from kaggle_secrets import UserSecretsClient
+
+        value = UserSecretsClient().get_secret(secret_label)
+    except Exception as exc:
+        if required:
+            print(f"Secret obrigatorio {secret_label} nao encontrado ou indisponivel ({exc}).")
+        return ""
+
+    return str(value).strip() if value else ""
+
+
+def get_env_or_kaggle_secret(labels: list[str], required: bool = False) -> str:
+    for label in labels:
+        value = os.environ.get(label, "").strip()
+        if value:
+            return value
+
+    for label in labels:
+        value = get_kaggle_secret(label, required=required)
+        if value:
+            os.environ[label] = value
+            print(f"Secret {label} carregado para variavel de ambiente.")
+            return value
+
+    return ""
+
+
 def cleanup_intermediate_audio(cfg: dict, local_raw: Path, local_processed: Path) -> None:
     if not cfg.get("cleanup_intermediate_audio", True):
         print("[DISCO] Limpeza de audios intermediarios desativada por configuracao.")
@@ -280,11 +309,9 @@ def load_r2_env_defaults(r2_cfg: dict) -> dict:
     for key, env_names in aliases.items():
         if out.get(key):
             continue
-        for env_name in env_names:
-            value = os.environ.get(env_name)
-            if value:
-                out[key] = value
-                break
+        value = get_env_or_kaggle_secret(env_names)
+        if value:
+            out[key] = value
     return out
 
 
@@ -729,7 +756,7 @@ def setup_huggingface(cfg: dict) -> dict | None:
         return None
 
     token_env = str(hf_cfg.get("token_env", "HF_TOKEN"))
-    token = os.environ.get(token_env, "")
+    token = get_env_or_kaggle_secret([token_env], required=bool(hf_cfg.get("required", False)))
     bucket_uri = str(hf_cfg.get("bucket_uri", "")).strip().rstrip("/")
     if not token or not bucket_uri.startswith("hf://buckets/"):
         message = f"Configure o secret {token_env} e huggingface.bucket_uri para ativar o upload."
@@ -747,8 +774,22 @@ def setup_huggingface(cfg: dict) -> dict | None:
         return None
 
     os.environ["HF_TOKEN"] = token
+    create_result = run(
+        ["hf", "buckets", "create", bucket_uri, "--exist-ok"],
+        check=False,
+    )
+    if create_result.returncode != 0:
+        message = (
+            f"Nao foi possivel criar ou acessar o bucket {bucket_uri}. "
+            "Verifique o namespace do bucket e as permissoes de escrita do HF_TOKEN."
+        )
+        if hf_cfg.get("required", False):
+            raise RuntimeError("[HuggingFace] " + message)
+        print("[HuggingFace][AVISO] " + message)
+        return None
+
     hf_cfg["_sync_lock"] = threading.Lock()
-    print(f"[HuggingFace] Bucket configurado: {bucket_uri}")
+    print(f"[HuggingFace] Bucket criado/validado: {bucket_uri}")
     return hf_cfg
 
 
@@ -764,7 +805,7 @@ def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
     if result.returncode == 0:
         print(f"[HuggingFace] Pacote restaurado em {package_dir}.")
         return True
-    print("[HuggingFace][AVISO] Nao foi possivel restaurar o bucket; o treino continuara sem estado remoto.")
+    print("[HuggingFace][AVISO] Nao foi possivel restaurar o pacote do bucket.")
     return False
 
 
