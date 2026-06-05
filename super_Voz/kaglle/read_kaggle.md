@@ -238,6 +238,11 @@ O runner tenta restaurar automaticamente de caminhos como:
 
 Se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning. Se nao encontrar, usa o checkpoint base do LibriTTS.
 
+Durante o treino, o runner nao apaga mais o checkpoint que acabou de enviar. Ele mantem o checkpoint
+mais recente em `Models/super_Voz` e remove apenas checkpoints anteriores quando um checkpoint mais
+novo ja foi enviado com sucesso. Isso evita que o config aponte para um arquivo removido no meio da
+retomada.
+
 ## Se der erro
 
 Enviar o trecho do log a partir de:

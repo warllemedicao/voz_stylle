@@ -302,6 +302,11 @@ O runner tenta restaurar automaticamente destes caminhos:
 
 Se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning com `load_only_params: false`. Se nao encontrar, usa o pretrained LibriTTS base.
 
+A retencao local de checkpoints segue uma janela segura: o checkpoint mais recente permanece em
+`Models/super_Voz` depois do upload, e o runner so remove checkpoints anteriores quando um checkpoint
+mais novo ja foi persistido. Assim o Kaggle economiza disco sem apagar o arquivo que o treino ainda
+pode precisar para continuar.
+
 ## Como obter os tokens TeraBox
 
 Os projetos publicos consultados documentam que os valores vem da sessao web logada:

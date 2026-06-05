@@ -33,6 +33,10 @@ Conclusoes:
 - O log avancou ate a epoca 31, passo 80/111, mas sem checkpoint correspondente.
 - O treino parece ter sido interrompido por sessao/tempo, nao por erro claro de modelo.
 - O checkpoint parcial ja pode ser usado para testes de inferencia, mas ainda nao deve ser considerado produto final.
+- No fluxo Kaggle atual, a limpeza de disco mantem sempre o checkpoint mais recente local e apaga
+  apenas checkpoints anteriores depois que um checkpoint mais novo foi enviado.
+- Se o treino falhar, a sincronizacao final ainda preserva artefatos para recuperacao, mas a saida
+  nao deve ser interpretada como treino concluido.
 
 Metricas observadas:
 

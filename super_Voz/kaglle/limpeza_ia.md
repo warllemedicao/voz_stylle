@@ -1,5 +1,10 @@
 # Registro de Alterações: limpeza_ia.py
 
+## [2026-06-05] Observacao do runner Kaggle
+- A limpeza de audio continua independente da retencao de checkpoints, mas o fluxo Kaggle foi ajustado para evitar falso sucesso de treino.
+- O runner mantem o checkpoint mais recente em `Models/super_Voz` apos upload e remove apenas checkpoints anteriores quando um checkpoint mais novo ja foi persistido.
+- Em caso de falha no `accelerate`, a sincronizacao final pode ocorrer para recuperacao, mas a mensagem final passa a indicar interrupcao/falha do treino.
+
 ## [2026-05-31]
 - Inicialização do registro de alterações.
 - Adicionado suporte ao argumento `--ambiente` (colab, kaggle, local).

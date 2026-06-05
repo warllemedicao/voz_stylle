@@ -826,11 +826,11 @@ def prune_uploaded_checkpoints(checkpoint_dir: Path, uploaded_checkpoint: Path) 
     checkpoints = sorted(checkpoint_dir.glob("epoch_2nd_*.pth"))
     removed = 0
     for path in checkpoints:
-        if path.name > uploaded_checkpoint.name:
+        if path.name >= uploaded_checkpoint.name:
             continue
         path.unlink()
         removed += 1
-        print(f"[DISCO] Checkpoint local antigo removido apos upload: {path.name}")
+        print(f"[DISCO] Checkpoint local anterior removido apos persistir checkpoint mais novo: {path.name}")
     return removed
 
 
@@ -1283,9 +1283,20 @@ def patch_styletts2_zero_division_safety(style_dir: Path) -> None:
         print("ℹ️ Patch contra ZeroDivisionError já aplicado ou não necessário.")
 
 
-def sync_outputs(style_dir: Path, dataset_dir: Path, cfg: dict, s3=None, bucket=None, checkpoint_state=None) -> None:
+def sync_outputs(
+    style_dir: Path,
+    dataset_dir: Path,
+    cfg: dict,
+    s3=None,
+    bucket=None,
+    checkpoint_state=None,
+    training_succeeded: bool = True,
+) -> None:
     print("\n" + "="*60)
-    print(" ✅ TREINO FINALIZADO!")
+    if training_succeeded:
+        print(" ✅ TREINO FINALIZADO!")
+    else:
+        print(" ⚠️ TREINO INTERROMPIDO OU COM FALHA!")
     print("="*60)
     print(f"Pacote da voz em: {style_dir / str(cfg.get('voice_package_dir', 'minha_voz_styletts2'))}")
     print(f"Dataset preparado em: {dataset_dir}")
@@ -1298,6 +1309,8 @@ def sync_outputs(style_dir: Path, dataset_dir: Path, cfg: dict, s3=None, bucket=
     if r2_cfg.get("disable_r2_uploads"):
         print("Nota: upload/sync R2 desativado por disable_r2_uploads=true; downloads R2 continuam permitidos.")
         print("Em Kaggle Commit, /kaggle/working entra nos outputs do notebook.")
+        if not training_succeeded:
+            print("Nota: o pacote foi sincronizado para recuperacao, mas o treino nao concluiu com sucesso.")
         print("="*60 + "\n")
         return
     output_prefix = r2_cfg.get("output_prefix")
@@ -1494,6 +1507,7 @@ def main() -> int:
     hf_sync_stop = None
     hf_sync_thread = None
     checkpoint_state = None
+    training_succeeded = False
     r2_cfg = cfg.get("cloudflare_r2", {})
     output_prefix = None if r2_cfg.get("disable_r2_uploads") else r2_cfg.get("output_prefix")
     if s3 and bucket and output_prefix:
@@ -1536,6 +1550,7 @@ def main() -> int:
                 "train_finetune_accelerate.py",
                 "--config_path", str(config_path),
             ], cwd=style_dir)
+        training_succeeded = True
     finally:
         if sync_stop and sync_thread:
             sync_stop.set()
@@ -1558,7 +1573,7 @@ def main() -> int:
             cfg,
         )
         report_working_disk("apos sincronizacao final")
-        sync_outputs(style_dir, dataset_dir, cfg, s3, bucket, checkpoint_state)
+        sync_outputs(style_dir, dataset_dir, cfg, s3, bucket, checkpoint_state, training_succeeded)
 
     print("\n✅ Treino finalizado! Pacote da voz em:", package_dir)
     return 0

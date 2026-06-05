@@ -10,7 +10,7 @@ O motivo principal e evitar taxas de escrita/persistencia no Cloudflare. A estra
 
 - usar Cloudflare R2 ou Kaggle Dataset como entrada de audios;
 - sincronizar o pacote completo da voz com Hugging Face Bucket;
-- manter apenas `minha_voz_styletts2/model/best_model.pth` depois de upload confirmado;
+- manter no working o checkpoint mais recente necessario para retomar o treino e apagar apenas checkpoints anteriores ja persistidos;
 - tentar TeraBox apenas como persistencia opcional, se houver uma CLI configurada e o secret `TERABOX_NDUS`.
 
 ## Politica Cloudflare
@@ -101,8 +101,12 @@ restaurar e sincronizar `/kaggle/working/StyleTTS2/minha_voz_styletts2` nesta or
 3. fallback para repositorio Hugging Face usando `hf download`, `hf upload-large-folder` e
    `hf upload`, derivando `warllem/Super_voz` de `hf://buckets/warllem/Super_voz`.
 
-Depois de um upload confirmado por qualquer um desses caminhos, remove os
-`epoch_2nd_*.pth` de `Models/super_Voz`, mantendo somente `model/best_model.pth` no pacote local.
+Depois de um upload confirmado por qualquer um desses caminhos, a politica de retencao local e:
+
+1. o checkpoint enviado continua em `Models/super_Voz`, pois ele pode ser o `pretrained_model`
+   usado pelo processo de treino em andamento;
+2. quando um checkpoint mais novo for enviado com sucesso, os checkpoints anteriores sao removidos;
+3. `model/best_model.pth` no pacote local continua sendo atualizado para distribuicao e retomada externa.
 
 O notebook carrega esse secret com `kaggle_secrets.UserSecretsClient` e grava em
 `os.environ`. O runner tambem faz fallback direto para `UserSecretsClient().get_secret("HF_TOKEN")`
@@ -113,8 +117,12 @@ Nesta configuracao, a persistencia Hugging Face e obrigatoria. Se `HF_TOKEN` est
 ou se nenhum backend de upload funcionar, o treino aborta antes de gerar checkpoints. Falha de
 restauracao remota antes do treino vira aviso, porque pode ser a primeira execucao ou o backend
 fallback pode estar vazio; o bloqueio obrigatorio e a validacao do upload inicial do pacote. O
-runner verifica novos checkpoints a cada 5 segundos, remove apenas os checkpoints que ja foram
-enviados e preserva qualquer checkpoint mais novo criado durante um upload.
+runner verifica novos checkpoints a cada 5 segundos, remove apenas checkpoints locais mais antigos
+que o ultimo checkpoint enviado e preserva o checkpoint atual para que o treino nao perca o arquivo
+de retomada.
+
+Se o processo `accelerate` falhar, o bloco final ainda sincroniza o pacote para recuperacao, mas a
+saida passa a informar `TREINO INTERROMPIDO OU COM FALHA` em vez de anunciar sucesso.
 
 ### Diagnostico de secret indisponivel no Kaggle
 
