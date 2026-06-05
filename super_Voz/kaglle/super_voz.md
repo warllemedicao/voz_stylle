@@ -256,6 +256,35 @@ Isso vale para `HF_TOKEN` e para os aliases R2 aceitos, como `R2_ACCESS_KEY_ID` 
 Com isso, o notebook pode continuar carregando secrets antes do runner, mas o script tambem
 fica protegido quando for executado diretamente no Kaggle.
 
+### Diagnóstico do erro `No user secrets exist`
+
+Se o Kaggle responder:
+
+```text
+No user secrets exist for kernel id ... and label HF_TOKEN
+```
+
+o runner novo ja esta sendo executado e a tentativa de leitura via `UserSecretsClient` chegou
+ao servico de secrets do Kaggle. A falha significa que, para aquele kernel/notebook, o Kaggle
+nao encontrou um secret com o label exato `HF_TOKEN`.
+
+Teste minimo antes do pipeline:
+
+```python
+from kaggle_secrets import UserSecretsClient
+
+for label in ["HF_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]:
+    try:
+        value = UserSecretsClient().get_secret(label)
+        print(label, "OK", "tamanho:", len(value or ""))
+    except Exception as exc:
+        print(label, "ERRO:", exc)
+```
+
+`HF_TOKEN` e obrigatorio e precisa aparecer como `OK`. Se falhar, corrija no Kaggle:
+`Add-ons > Secrets`, label exatamente `HF_TOKEN`, value com o token Hugging Face, salvar,
+reiniciar o kernel e executar o teste novamente.
+
 ## Simulação do Encerramento na Época 10 (05/06/2026)
 
 Foi informado que uma execução anterior treinou até a `epoch 10` e depois finalizou sozinha por causa de um erro. Pela leitura do runner Kaggle, a época 10 é um ponto sensível porque o YAML usa:

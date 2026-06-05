@@ -222,6 +222,23 @@ R2_RAW_AUDIO_PREFIX
 
 O runner preenche campos ausentes a partir das variaveis de ambiente carregadas pelo notebook ou, quando executado diretamente no Kaggle, via `kaggle_secrets.UserSecretsClient`. Use exatamente os labels acima nos Kaggle Secrets.
 
+Se o Kaggle responder `No user secrets exist for kernel id ... and label ...`, o secret nao
+esta disponivel para aquele kernel com o label solicitado. Valide em uma celula separada:
+
+```python
+from kaggle_secrets import UserSecretsClient
+
+for label in ["HF_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]:
+    try:
+        value = UserSecretsClient().get_secret(label)
+        print(label, "OK", "tamanho:", len(value or ""))
+    except Exception as exc:
+        print(label, "ERRO:", exc)
+```
+
+`HF_TOKEN` e obrigatorio para a persistencia em Hugging Face. Os dois secrets R2 so sao
+necessarios quando as credenciais nao estiverem disponiveis no YAML ou em variaveis de ambiente.
+
 ## TeraBox
 
 Nao ha CLI oficial estavel do TeraBox equivalente ao `rclone`. A solucao implementada usa um wrapper configuravel em:

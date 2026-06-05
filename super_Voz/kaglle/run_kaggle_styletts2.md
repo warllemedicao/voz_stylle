@@ -108,6 +108,36 @@ puder ser acessado/criado com `hf buckets create ... --exist-ok`, o treino abort
 gerar checkpoints. O runner verifica novos checkpoints a cada 5 segundos, remove apenas os
 checkpoints que ja foram enviados e preserva qualquer checkpoint mais novo criado durante um upload.
 
+### Diagnostico de secret indisponivel no Kaggle
+
+Se o log mostrar:
+
+```text
+No user secrets exist for kernel id ... and label HF_TOKEN
+```
+
+o problema nao esta no runner: o servico do Kaggle informou que o secret `HF_TOKEN` nao existe
+ou nao esta disponivel para aquele kernel/notebook. Isso pode acontecer quando o label foi
+criado com outro nome, em outro notebook/conta, no lugar errado da interface, ou quando o kernel
+nao foi reiniciado depois da criacao do secret.
+
+Antes de rodar o pipeline, valide em uma celula separada:
+
+```python
+from kaggle_secrets import UserSecretsClient
+
+for label in ["HF_TOKEN", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"]:
+    try:
+        value = UserSecretsClient().get_secret(label)
+        print(label, "OK", "tamanho:", len(value or ""))
+    except Exception as exc:
+        print(label, "ERRO:", exc)
+```
+
+`HF_TOKEN` precisa aparecer como `OK`. Se ainda aparecer erro, recrie o secret em
+`Add-ons > Secrets` usando exatamente o label `HF_TOKEN`, salve, reinicie o kernel e rode o
+teste novamente.
+
 Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` e
 `Audios_processados` depois que o dataset final e o pacote forem criados. O dataset preparado
 da execucao anterior e os WAVs antigos do pacote sao removidos antes de recriar a versao atual.
