@@ -774,23 +774,31 @@ def setup_huggingface(cfg: dict) -> dict | None:
         return None
 
     os.environ["HF_TOKEN"] = token
+    repo_fallback_id = bucket_uri.removeprefix("hf://buckets/").strip("/")
+    hf_cfg["_repo_fallback_id"] = repo_fallback_id
+
     create_result = run(
         ["hf", "buckets", "create", bucket_uri, "--exist-ok"],
         check=False,
     )
     if create_result.returncode != 0:
-        message = (
-            f"Nao foi possivel criar ou acessar o bucket {bucket_uri}. "
-            "Verifique o namespace do bucket e as permissoes de escrita do HF_TOKEN."
+        print(
+            "[HuggingFace][AVISO] CLI sem suporte funcional a buckets ou bucket inacessivel; "
+            f"usando fallback de repositorio: {repo_fallback_id}"
         )
-        if hf_cfg.get("required", False):
-            raise RuntimeError("[HuggingFace] " + message)
-        print("[HuggingFace][AVISO] " + message)
-        return None
+    else:
+        print(f"[HuggingFace] Bucket criado/validado: {bucket_uri}")
 
     hf_cfg["_sync_lock"] = threading.Lock()
-    print(f"[HuggingFace] Bucket criado/validado: {bucket_uri}")
     return hf_cfg
+
+
+def huggingface_bucket_uri(hf_cfg: dict) -> str:
+    return str(hf_cfg["bucket_uri"]).strip().rstrip("/")
+
+
+def huggingface_repo_fallback_id(hf_cfg: dict) -> str:
+    return str(hf_cfg.get("_repo_fallback_id") or huggingface_bucket_uri(hf_cfg).removeprefix("hf://buckets/")).strip("/")
 
 
 def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
@@ -798,14 +806,19 @@ def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
         return False
 
     package_dir.mkdir(parents=True, exist_ok=True)
-    result = run(
-        ["hf", "sync", str(hf_cfg["bucket_uri"]), str(package_dir)],
-        check=False,
-    )
-    if result.returncode == 0:
-        print(f"[HuggingFace] Pacote restaurado em {package_dir}.")
-        return True
-    print("[HuggingFace][AVISO] Nao foi possivel restaurar o pacote do bucket.")
+    bucket_uri = huggingface_bucket_uri(hf_cfg)
+    repo_id = huggingface_repo_fallback_id(hf_cfg)
+    commands = [
+        ["hf", "buckets", "sync", bucket_uri, str(package_dir)],
+        ["hf", "sync", bucket_uri, str(package_dir)],
+        ["hf", "download", repo_id, "--local-dir", str(package_dir)],
+    ]
+    for command in commands:
+        result = run(command, check=False)
+        if result.returncode == 0:
+            print(f"[HuggingFace] Pacote restaurado em {package_dir}.")
+            return True
+    print("[HuggingFace][AVISO] Nao foi possivel restaurar o pacote do Hugging Face.")
     return False
 
 
@@ -988,15 +1001,29 @@ def huggingface_sync_package(
         latest = materialize_voice_package(
             package_dir, style_dir, dataset_dir, processed_dir, project_dir, config_path, cfg
         )
-        result = run(
-            ["hf", "sync", str(package_dir), str(hf_cfg["bucket_uri"]), "--delete"],
-            check=False,
-        )
-        if result.returncode != 0:
+        bucket_uri = huggingface_bucket_uri(hf_cfg)
+        repo_id = huggingface_repo_fallback_id(hf_cfg)
+        commands = [
+            ["hf", "buckets", "sync", str(package_dir), bucket_uri, "--delete"],
+            ["hf", "sync", str(package_dir), bucket_uri, "--delete"],
+            ["hf", "upload-large-folder", repo_id, str(package_dir), "--repo-type", "model"],
+            ["hf", "upload", repo_id, str(package_dir), ".", "--repo-type", "model"],
+        ]
+        synced = False
+        target = bucket_uri
+        for command in commands:
+            result = run(command, check=False)
+            if result.returncode == 0:
+                synced = True
+                if command[1] in {"upload-large-folder", "upload"}:
+                    target = f"repo:{repo_id}"
+                break
+
+        if not synced:
             print("[HuggingFace][AVISO] Upload do pacote falhou; checkpoints locais foram preservados.")
             report_working_disk("upload Hugging Face falhou")
             return False
-        print(f"[HuggingFace] Pacote sincronizado: {package_dir} -> {hf_cfg['bucket_uri']}")
+        print(f"[HuggingFace] Pacote sincronizado: {package_dir} -> {target}")
         if latest and latest.parent.name == "super_Voz":
             prune_uploaded_checkpoints(style_dir / "Models" / "super_Voz", latest)
             remove_pretrained_base_after_finetune_upload(style_dir)
@@ -1350,8 +1377,8 @@ def main() -> int:
     terabox_cfg = setup_terabox(cfg)
     huggingface_cfg = setup_huggingface(cfg)
     restored_hf = huggingface_restore_package(huggingface_cfg, package_dir)
-    if huggingface_cfg and huggingface_cfg.get("required", False) and not restored_hf:
-        raise RuntimeError("[HuggingFace] Nao foi possivel acessar o bucket obrigatorio antes do treino.")
+    if huggingface_cfg and not restored_hf:
+        print("[HuggingFace][AVISO] Pacote remoto nao restaurado; o upload inicial sera validado antes do treino.")
 
     patch_pytorch_compatibility(style_dir)
     patch_styletts2_oom_safety(style_dir)

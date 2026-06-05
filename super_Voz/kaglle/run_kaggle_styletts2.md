@@ -93,20 +93,28 @@ Adicione este Kaggle Secret:
 HF_TOKEN
 ```
 
-O token precisa de permissao de escrita no bucket. O runner usa `hf sync` para restaurar o
-pacote antes do treino e sincroniza `/kaggle/working/StyleTTS2/minha_voz_styletts2` durante
-o treino. Depois de um upload confirmado, remove os `epoch_2nd_*.pth` de
-`Models/super_Voz`, mantendo somente `model/best_model.pth` no pacote local.
+O token precisa de permissao de escrita no bucket ou no repositorio fallback. O runner tenta
+restaurar e sincronizar `/kaggle/working/StyleTTS2/minha_voz_styletts2` nesta ordem:
+
+1. `hf buckets sync`, quando a CLI instalada suporta Hugging Face Buckets;
+2. `hf sync`, quando esse alias existir;
+3. fallback para repositorio Hugging Face usando `hf download`, `hf upload-large-folder` e
+   `hf upload`, derivando `warllem/Super_voz` de `hf://buckets/warllem/Super_voz`.
+
+Depois de um upload confirmado por qualquer um desses caminhos, remove os
+`epoch_2nd_*.pth` de `Models/super_Voz`, mantendo somente `model/best_model.pth` no pacote local.
 
 O notebook carrega esse secret com `kaggle_secrets.UserSecretsClient` e grava em
 `os.environ`. O runner tambem faz fallback direto para `UserSecretsClient().get_secret("HF_TOKEN")`
 quando `HF_TOKEN` nao estiver no ambiente. Assim, o script tambem funciona quando for chamado
 diretamente no Kaggle, desde que o secret exista com esse label exato.
 
-Nesta configuracao, o bucket e obrigatorio. Se `HF_TOKEN` estiver ausente ou o bucket nao
-puder ser acessado/criado com `hf buckets create ... --exist-ok`, o treino aborta antes de
-gerar checkpoints. O runner verifica novos checkpoints a cada 5 segundos, remove apenas os
-checkpoints que ja foram enviados e preserva qualquer checkpoint mais novo criado durante um upload.
+Nesta configuracao, a persistencia Hugging Face e obrigatoria. Se `HF_TOKEN` estiver ausente
+ou se nenhum backend de upload funcionar, o treino aborta antes de gerar checkpoints. Falha de
+restauracao remota antes do treino vira aviso, porque pode ser a primeira execucao ou o backend
+fallback pode estar vazio; o bloqueio obrigatorio e a validacao do upload inicial do pacote. O
+runner verifica novos checkpoints a cada 5 segundos, remove apenas os checkpoints que ja foram
+enviados e preserva qualquer checkpoint mais novo criado durante um upload.
 
 ### Diagnostico de secret indisponivel no Kaggle
 
@@ -146,11 +154,21 @@ Quando `best_model.pth` ja foi restaurado, o checkpoint base LibriTTS nao e baix
 No primeiro treinamento, esse checkpoint base e removido depois que o primeiro checkpoint da
 voz for sincronizado com sucesso.
 
-O upload usa `--delete`, portanto o bucket nao acumula artefatos removidos do pacote. Para
-baixar a voz em outro computador:
+Quando o backend usado for `hf buckets sync` ou `hf sync`, o upload usa `--delete`, portanto o
+bucket nao acumula artefatos removidos do pacote. Quando a CLI do Kaggle nao oferece suporte a
+buckets/sync, o fallback para repositorio usa `hf upload-large-folder` e nao remove arquivos
+remotos antigos automaticamente.
+
+Para baixar a voz em outro computador usando bucket:
 
 ```text
-hf sync hf://buckets/warllem/Super_voz ./local
+hf buckets sync hf://buckets/warllem/Super_voz ./local
+```
+
+Se a CLI nao tiver `hf buckets sync`, use o repositorio fallback:
+
+```text
+hf download warllem/Super_voz --local-dir ./local
 ```
 
 No Windows, instale a CLI com:
@@ -162,7 +180,13 @@ powershell -ExecutionPolicy ByPass -c "irm https://hf.co/cli/install.ps1 | iex"
 Para enviar uma pasta manualmente:
 
 ```text
-hf sync ./data hf://buckets/warllem/Super_voz
+hf buckets sync ./data hf://buckets/warllem/Super_voz --delete
+```
+
+Fallback manual para repositorio:
+
+```text
+hf upload-large-folder warllem/Super_voz ./data --repo-type model
 ```
 
 O pacote inclui `best_model.pth`, `config.yml`, listas e audios do dataset, metadata,
