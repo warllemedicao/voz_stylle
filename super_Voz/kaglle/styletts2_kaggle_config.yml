@@ -22,7 +22,9 @@ huggingface:
   required: true
   token_env: "HF_TOKEN"
   bucket_uri: "hf://buckets/warllem/Super_voz"
-  sync_interval_seconds: 60
+  # Intervalo de checagem do monitor. Upload real ocorre apenas quando surge checkpoint novo
+  # de epoca ou no encerramento critico/final.
+  sync_interval_seconds: 300
 
 # Persistencia opcional via TeraBox.
 # Recomendado: use Kaggle Secrets. Para o modo padrao abaixo, crie:

@@ -106,7 +106,9 @@ Depois de um upload confirmado por qualquer um desses caminhos, a politica de re
 1. o checkpoint enviado continua em `Models/super_Voz`, pois ele pode ser o `pretrained_model`
    usado pelo processo de treino em andamento;
 2. quando um checkpoint mais novo for enviado com sucesso, os checkpoints anteriores sao removidos;
-3. `model/best_model.pth` no pacote local continua sendo atualizado para distribuicao e retomada externa.
+3. `model/latest_checkpoint.pth` no pacote guarda o ultimo checkpoint valido para retomada externa;
+4. `model/best_model.pth` no pacote guarda o melhor checkpoint conhecido pela perda de validacao,
+   ou o primeiro checkpoint valido quando ainda nao ha metrica confiavel.
 
 O notebook carrega esse secret com `kaggle_secrets.UserSecretsClient` e grava em
 `os.environ`. O runner tambem faz fallback direto para `UserSecretsClient().get_secret("HF_TOKEN")`
@@ -116,10 +118,16 @@ diretamente no Kaggle, desde que o secret exista com esse label exato.
 Nesta configuracao, a persistencia Hugging Face e obrigatoria. Se `HF_TOKEN` estiver ausente
 ou se nenhum backend de upload funcionar, o treino aborta antes de gerar checkpoints. Falha de
 restauracao remota antes do treino vira aviso, porque pode ser a primeira execucao ou o backend
-fallback pode estar vazio; o bloqueio obrigatorio e a validacao do upload inicial do pacote. O
-runner verifica novos checkpoints a cada 5 segundos, remove apenas checkpoints locais mais antigos
-que o ultimo checkpoint enviado e preserva o checkpoint atual para que o treino nao perca o arquivo
-de retomada.
+fallback pode estar vazio. O runner valida acesso ao Hugging Face no setup, mas nao faz upload
+inicial do pacote antes do treino. O monitor checa novos checkpoints em intervalo configuravel
+(`huggingface.sync_interval_seconds`, 300s por padrao), e so faz upload quando encontra um
+`epoch_2nd_*.pth` novo, valido e estavel. O bloco `finally` ainda faz um upload critico/final
+antes de encerrar a sessao.
+
+Essa politica evita uploads por batch, step ou intervalos curtos de tempo. Sem checkpoint novo, a
+checagem nao sincroniza o diretorio inteiro. Depois de upload confirmado, o runner remove somente
+checkpoints locais anteriores ao ultimo checkpoint persistido e registra o espaco recuperado nos
+logs `[DISCO]`.
 
 Se o processo `accelerate` falhar, o bloco final ainda sincroniza o pacote para recuperacao, mas a
 saida passa a informar `TREINO INTERROMPIDO OU COM FALHA` em vez de anunciar sucesso.

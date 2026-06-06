@@ -256,6 +256,70 @@ def report_working_disk(label: str, working_dir: Path = Path("/kaggle/working"))
     )
 
 
+def path_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for item in path.rglob("*"):
+        if item.is_file():
+            total += item.stat().st_size
+    return total
+
+
+def disk_size(paths: Path | list[Path]) -> int:
+    items = [paths] if isinstance(paths, Path) else paths
+    seen: set[tuple[int, int]] = set()
+    total = 0
+
+    for path in items:
+        if not path.exists():
+            continue
+        candidates = [path] if path.is_file() else [item for item in path.rglob("*") if item.is_file()]
+        for item in candidates:
+            stat = item.stat()
+            key = (stat.st_dev, stat.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            total += getattr(stat, "st_blocks", 0) * 512 or stat.st_size
+    return total
+
+
+def removable_file_bytes(path: Path) -> int:
+    stat = path.stat()
+    if getattr(stat, "st_nlink", 1) > 1:
+        return 0
+    return getattr(stat, "st_blocks", 0) * 512 or stat.st_size
+
+
+def checkpoint_epoch(path: Path) -> int:
+    match = re.search(r"epoch_2nd_(\d+)\.pth$", path.name)
+    return int(match.group(1)) if match else -1
+
+
+def list_valid_finetune_checkpoints(style_dir: Path) -> list[Path]:
+    ckpt_dir = style_dir / "Models" / "super_Voz"
+    checkpoints = [path for path in ckpt_dir.glob("epoch_2nd_*.pth") if zipfile.is_zipfile(path)]
+    return sorted(checkpoints, key=lambda path: (checkpoint_epoch(path), path.name))
+
+
+def checkpoint_state(path: Path | None) -> tuple[str, int, int] | None:
+    if not path or not path.exists():
+        return None
+    stat = path.stat()
+    return (path.name, stat.st_size, stat.st_mtime_ns)
+
+
+def is_stable_checkpoint(path: Path, min_age_seconds: int = 20) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    if time.time() - path.stat().st_mtime < min_age_seconds:
+        return False
+    return zipfile.is_zipfile(path)
+
+
 def get_kaggle_secret(secret_label: str, required: bool = False) -> str:
     try:
         from kaggle_secrets import UserSecretsClient
@@ -822,24 +886,83 @@ def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
     return False
 
 
-def prune_uploaded_checkpoints(checkpoint_dir: Path, uploaded_checkpoint: Path) -> int:
-    checkpoints = sorted(checkpoint_dir.glob("epoch_2nd_*.pth"))
+def prune_uploaded_checkpoints(checkpoint_dir: Path, uploaded_checkpoint: Path) -> tuple[int, int]:
+    checkpoints = sorted(
+        [path for path in checkpoint_dir.glob("epoch_2nd_*.pth") if path.is_file()],
+        key=lambda path: (checkpoint_epoch(path), path.name),
+    )
+    latest_local = checkpoints[-1] if checkpoints else None
     removed = 0
+    recovered = 0
+    uploaded_epoch = checkpoint_epoch(uploaded_checkpoint)
+
     for path in checkpoints:
-        if path.name >= uploaded_checkpoint.name:
+        if path.resolve() == uploaded_checkpoint.resolve():
             continue
+        if latest_local and path.resolve() == latest_local.resolve():
+            continue
+        if checkpoint_epoch(path) >= uploaded_epoch:
+            continue
+        size = path.stat().st_size
+        freed = removable_file_bytes(path)
         path.unlink()
         removed += 1
-        print(f"[DISCO] Checkpoint local anterior removido apos persistir checkpoint mais novo: {path.name}")
-    return removed
+        recovered += freed
+        print(
+            "[DISCO] Checkpoint local obsoleto removido apos upload confirmado: "
+            f"{path.name} ({format_bytes(size)}, liberado {format_bytes(freed)})"
+        )
+
+    if removed:
+        print(f"[DISCO] Limpeza de checkpoints recuperou {format_bytes(recovered)}.")
+    return removed, recovered
 
 
-def remove_pretrained_base_after_finetune_upload(style_dir: Path) -> None:
+def remove_pretrained_base_after_finetune_upload(style_dir: Path) -> int:
     base_checkpoint = style_dir / "Models" / "LibriTTS" / "epochs_2nd_00020.pth"
     if not base_checkpoint.exists():
-        return
+        return 0
+    size = base_checkpoint.stat().st_size
+    freed = removable_file_bytes(base_checkpoint)
     base_checkpoint.unlink()
-    print(f"[DISCO] Checkpoint base removido apos persistir a voz treinada: {base_checkpoint}")
+    print(
+        "[DISCO] Checkpoint base removido apos persistir a voz treinada: "
+        f"{base_checkpoint} ({format_bytes(size)}, liberado {format_bytes(freed)})"
+    )
+    return freed
+
+
+def cleanup_training_artifacts(style_dir: Path, package_dir: Path) -> int:
+    roots = [
+        style_dir / "Models" / "super_Voz",
+        package_dir,
+    ]
+    removable_names = {"__pycache__", ".ipynb_checkpoints"}
+    removable_suffixes = {".tmp", ".part", ".partial", ".incomplete"}
+    recovered = 0
+
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*"), reverse=True):
+            try:
+                if path.is_dir() and path.name in removable_names:
+                    size = disk_size(path)
+                    shutil.rmtree(path)
+                    recovered += size
+                    print(f"[DISCO] Temporario removido: {path} ({format_bytes(size)})")
+                elif path.is_file() and path.suffix.lower() in removable_suffixes:
+                    size = path.stat().st_size
+                    freed = removable_file_bytes(path)
+                    path.unlink()
+                    recovered += freed
+                    print(f"[DISCO] Temporario removido: {path} ({format_bytes(size)}, liberado {format_bytes(freed)})")
+            except OSError as exc:
+                print(f"[DISCO][AVISO] Nao foi possivel remover temporario {path}: {exc}")
+
+    if recovered:
+        print(f"[DISCO] Limpeza de temporarios recuperou {format_bytes(recovered)}.")
+    return recovered
 
 
 def replace_with_hardlink_or_copy(src: Path, dst: Path) -> None:
@@ -876,6 +999,83 @@ def hardlink_tree(src: Path, dst: Path) -> bool:
     return True
 
 
+def read_validation_losses(style_dir: Path) -> dict[int, float]:
+    log_path = style_dir / "Models" / "super_Voz" / "train.log"
+    if not log_path.exists():
+        return {}
+
+    epoch_re = re.compile(r"Epoch \[(\d+)/\d+\]")
+    val_re = re.compile(r"Validation loss: ([0-9.]+)")
+    current_epoch = None
+    losses: dict[int, float] = {}
+
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        epoch_match = epoch_re.search(line)
+        if epoch_match:
+            current_epoch = int(epoch_match.group(1))
+        val_match = val_re.search(line)
+        if val_match and current_epoch is not None:
+            losses[current_epoch] = float(val_match.group(1))
+
+    return losses
+
+
+def read_best_metric(package_dir: Path) -> float | None:
+    metric_path = package_dir / "model" / "best_metric.txt"
+    if not metric_path.exists():
+        return None
+    for line in metric_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("validation_loss="):
+            try:
+                return float(line.split("=", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def maybe_update_best_model(package_dir: Path, style_dir: Path, latest: Path) -> bool:
+    model_dir = package_dir / "model"
+    best_path = model_dir / "best_model.pth"
+    best_metric_path = model_dir / "best_metric.txt"
+    latest_epoch = checkpoint_epoch(latest)
+    losses = read_validation_losses(style_dir)
+    latest_loss = losses.get(latest_epoch)
+    current_best = read_best_metric(package_dir)
+
+    candidate = latest
+    candidate_epoch = latest_epoch
+    candidate_loss = latest_loss
+    if not best_path.exists() and losses:
+        checkpoints_by_epoch = {checkpoint_epoch(path): path for path in list_valid_finetune_checkpoints(style_dir)}
+        available = [
+            (loss, epoch, checkpoints_by_epoch[epoch])
+            for epoch, loss in losses.items()
+            if epoch in checkpoints_by_epoch
+        ]
+        if available:
+            candidate_loss, candidate_epoch, candidate = min(available, key=lambda item: item[0])
+
+    should_update = not best_path.exists()
+    if candidate_loss is not None and (current_best is None or candidate_loss < current_best):
+        should_update = True
+
+    if not should_update:
+        return False
+
+    replace_with_hardlink_or_copy(candidate, best_path)
+    metric_lines = [
+        f"source_checkpoint={candidate.name}",
+        f"epoch={candidate_epoch}",
+    ]
+    if candidate_loss is not None:
+        metric_lines.append(f"validation_loss={candidate_loss}")
+    else:
+        metric_lines.append("validation_loss=unknown")
+    best_metric_path.write_text("\n".join(metric_lines) + "\n", encoding="utf-8")
+    print(f"[CHECKPOINT] best_model.pth atualizado a partir de {candidate.name}.")
+    return True
+
+
 def materialize_voice_package(
     package_dir: Path,
     style_dir: Path,
@@ -895,7 +1095,9 @@ def materialize_voice_package(
     (model_dir / "vocoder").mkdir(parents=True, exist_ok=True)
 
     if latest:
-        replace_with_hardlink_or_copy(latest, model_dir / "best_model.pth")
+        replace_with_hardlink_or_copy(latest, model_dir / "latest_checkpoint.pth")
+        (model_dir / "latest_checkpoint.txt").write_text(latest.name + "\n", encoding="utf-8")
+        maybe_update_best_model(package_dir, style_dir, latest)
     copy_if_exists(config_path, model_dir / "config.yml")
     (model_dir / "vocoder" / "README.txt").write_text(
         "O decoder/vocoder do StyleTTS2 esta incorporado em model/best_model.pth.\n",
@@ -987,6 +1189,7 @@ def huggingface_sync_package(
     project_dir: Path,
     config_path: Path,
     cfg: dict,
+    reason: str = "manual",
 ) -> bool:
     if not hf_cfg:
         materialize_voice_package(
@@ -1011,6 +1214,7 @@ def huggingface_sync_package(
         ]
         synced = False
         target = bucket_uri
+        print(f"[HuggingFace] Iniciando upload do pacote ({reason}).")
         for command in commands:
             result = run(command, check=False)
             if result.returncode == 0:
@@ -1025,14 +1229,20 @@ def huggingface_sync_package(
             return False
         print(f"[HuggingFace] Pacote sincronizado: {package_dir} -> {target}")
         if latest and latest.parent.name == "super_Voz":
+            before_cleanup = disk_size([style_dir / "Models" / "super_Voz", package_dir])
             prune_uploaded_checkpoints(style_dir / "Models" / "super_Voz", latest)
             remove_pretrained_base_after_finetune_upload(style_dir)
+            cleanup_training_artifacts(style_dir, package_dir)
+            after_cleanup = disk_size([style_dir / "Models" / "super_Voz", package_dir])
+            recovered = max(0, before_cleanup - after_cleanup)
+            print(f"[DISCO] Limpeza apos upload confirmou {format_bytes(recovered)} recuperados.")
+            report_working_disk("apos limpeza de checkpoints")
         return True
     finally:
         lock.release()
 
 
-def start_periodic_huggingface_package_sync(
+def start_huggingface_checkpoint_sync(
     hf_cfg: dict | None,
     package_dir: Path,
     style_dir: Path,
@@ -1041,7 +1251,7 @@ def start_periodic_huggingface_package_sync(
     project_dir: Path,
     config_path: Path,
     cfg: dict,
-    interval_seconds: int,
+    poll_interval_seconds: int,
 ) -> tuple[threading.Event, threading.Thread] | tuple[None, None]:
     if not hf_cfg:
         return None, None
@@ -1049,28 +1259,35 @@ def start_periodic_huggingface_package_sync(
     stop_event = threading.Event()
 
     def worker() -> None:
-        last_checkpoint = None
-        last_sync = time.monotonic()
-        while not stop_event.wait(5):
+        last_uploaded = hf_cfg.get("_last_uploaded_checkpoint")
+        while not stop_event.wait(poll_interval_seconds):
             latest = latest_finetune_checkpoint(style_dir)
-            checkpoint_state = None
-            if latest and latest.parent.name == "super_Voz":
-                stat = latest.stat()
-                checkpoint_state = (latest.name, stat.st_size, stat.st_mtime_ns)
-            due_for_log = time.monotonic() - last_sync >= interval_seconds
-            if checkpoint_state == last_checkpoint and not due_for_log:
+            if not latest or latest.parent.name != "super_Voz":
+                continue
+            current_state = checkpoint_state(latest)
+            if current_state == last_uploaded:
+                continue
+            if not is_stable_checkpoint(latest):
                 continue
             if huggingface_sync_package(
-                hf_cfg, package_dir, style_dir, dataset_dir, processed_dir, project_dir, config_path, cfg
+                hf_cfg,
+                package_dir,
+                style_dir,
+                dataset_dir,
+                processed_dir,
+                project_dir,
+                config_path,
+                cfg,
+                reason=f"checkpoint de epoca concluida: {latest.name}",
             ):
-                last_checkpoint = checkpoint_state
-                last_sync = time.monotonic()
+                last_uploaded = current_state
+                hf_cfg["_last_uploaded_checkpoint"] = current_state
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     print(
-        "[HuggingFace] Monitor de checkpoints ativo a cada 5s; "
-        f"logs sincronizados no maximo a cada {interval_seconds}s."
+        "[HuggingFace] Monitor de checkpoints ativo; "
+        f"checagem a cada {poll_interval_seconds}s, upload somente para checkpoint novo de epoca."
     )
     return stop_event, thread
 
@@ -1149,10 +1366,12 @@ def download_pretrained(style_dir: Path) -> Path:
 
 
 def latest_finetune_checkpoint(style_dir: Path) -> Path | None:
-    ckpt_dir = style_dir / "Models" / "super_Voz"
-    checkpoints = sorted(path for path in ckpt_dir.glob("epoch_2nd_*.pth") if zipfile.is_zipfile(path))
+    checkpoints = list_valid_finetune_checkpoints(style_dir)
     if checkpoints:
         return checkpoints[-1]
+    packaged_latest = style_dir / "minha_voz_styletts2" / "model" / "latest_checkpoint.pth"
+    if packaged_latest.exists() and zipfile.is_zipfile(packaged_latest):
+        return packaged_latest
     packaged = style_dir / "minha_voz_styletts2" / "model" / "best_model.pth"
     return packaged if packaged.exists() else None
 
@@ -1391,7 +1610,7 @@ def main() -> int:
     huggingface_cfg = setup_huggingface(cfg)
     restored_hf = huggingface_restore_package(huggingface_cfg, package_dir)
     if huggingface_cfg and not restored_hf:
-        print("[HuggingFace][AVISO] Pacote remoto nao restaurado; o upload inicial sera validado antes do treino.")
+        print("[HuggingFace][AVISO] Pacote remoto nao restaurado; o primeiro upload ocorrera no primeiro checkpoint.")
 
     patch_pytorch_compatibility(style_dir)
     patch_styletts2_oom_safety(style_dir)
@@ -1485,8 +1704,7 @@ def main() -> int:
     else:
         download_pretrained(style_dir)
     config_path = patch_styletts2_config(style_dir, dataset_dir, cfg)
-    initial_hf_sync = huggingface_sync_package(
-        huggingface_cfg,
+    materialize_voice_package(
         package_dir,
         style_dir,
         dataset_dir,
@@ -1495,8 +1713,8 @@ def main() -> int:
         config_path,
         cfg,
     )
-    if huggingface_cfg and huggingface_cfg.get("required", False) and not initial_hf_sync:
-        raise RuntimeError("[HuggingFace] Nao foi possivel validar o upload do pacote antes do treino.")
+    if huggingface_cfg:
+        print("[HuggingFace] Upload inicial do pacote pulado; o proximo envio ocorrera no primeiro checkpoint de epoca.")
     cleanup_intermediate_audio(cfg, local_raw, local_processed)
     report_working_disk("apos remover audios intermediarios")
 
@@ -1527,8 +1745,8 @@ def main() -> int:
             max(60, tb_interval_seconds),
         )
     if huggingface_cfg:
-        hf_interval_seconds = int(huggingface_cfg.get("sync_interval_seconds", 60))
-        hf_sync_stop, hf_sync_thread = start_periodic_huggingface_package_sync(
+        hf_interval_seconds = int(huggingface_cfg.get("sync_interval_seconds", 300))
+        hf_sync_stop, hf_sync_thread = start_huggingface_checkpoint_sync(
             huggingface_cfg,
             package_dir,
             style_dir,
@@ -1537,7 +1755,7 @@ def main() -> int:
             project_dir,
             config_path,
             cfg,
-            max(15, hf_interval_seconds),
+            max(30, hf_interval_seconds),
         )
 
     try:
@@ -1571,6 +1789,7 @@ def main() -> int:
             project_dir,
             config_path,
             cfg,
+            reason="checkpoint critico/final antes de encerrar sessao",
         )
         report_working_disk("apos sincronizacao final")
         sync_outputs(style_dir, dataset_dir, cfg, s3, bucket, checkpoint_state, training_succeeded)

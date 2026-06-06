@@ -97,7 +97,7 @@ terabox:
     - ["chmod", "+x", "/kaggle/working/terabox-cli"]
 ```
 
-Os templates `login_command`, `download_command` e `upload_command` podem ser ajustados conforme a sintaxe da CLI escolhida. O pipeline baixa o estado remoto do StyleTTS2 antes de escolher o checkpoint, envia checkpoints periodicamente durante o treino e faz um upload final ao encerrar.
+Os templates `login_command`, `download_command` e `upload_command` podem ser ajustados conforme a sintaxe da CLI escolhida. O pipeline baixa o estado remoto do StyleTTS2 antes de escolher o checkpoint, envia checkpoints apenas quando uma época gera um checkpoint novo válido ou no upload crítico/final, e remove checkpoints locais antigos somente depois de persistência confirmada.
 
 ## Erros Comuns e Correções
 

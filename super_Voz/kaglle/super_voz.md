@@ -181,10 +181,10 @@ hf://buckets/warllem/Super_voz
   cai para repositorio Hugging Face com `hf upload-large-folder`/`hf upload` quando a CLI do
   Kaggle nao tiver suporte a buckets.
 - Depois que o upload é confirmado, o checkpoint atual permanece em `Models/super_Voz`; apenas checkpoints anteriores ao último checkpoint enviado são apagados.
-- O pacote mantém `model/best_model.pth` para distribuição, mas o working preserva o checkpoint mais recente para retomada segura do treino.
+- O pacote mantém `model/latest_checkpoint.pth` para retomada e `model/best_model.pth` para o melhor modelo conhecido.
 - O Hugging Face é obrigatório na configuração Kaggle: sem `HF_TOKEN` ou sem backend de upload funcional, o treino aborta antes de gerar checkpoints locais.
-- Falha ao restaurar pacote remoto nao aborta sozinha; o runner continua e exige sucesso no upload inicial antes do treino.
-- O runner monitora checkpoints novos a cada 5 segundos e só apaga um checkpoint quando um checkpoint mais novo já foi persistido com sucesso.
+- Falha ao restaurar pacote remoto nao aborta sozinha; o primeiro upload real ocorre no primeiro checkpoint de epoca.
+- O runner checa checkpoints novos a cada 300 segundos por padrao e só faz upload quando encontra um checkpoint novo, valido e estavel.
 - Se o treino falhar, o bloco final sincroniza o pacote para recuperação, mas a mensagem final informa falha/interrupção em vez de `TREINO FINALIZADO`.
 - `Audios_brutos` e `Audios_processados` são removidos depois que o dataset final e o pacote forem criados.
 - O dataset preparado de uma execução anterior e os WAVs antigos do pacote são removidos antes de gerar a versão atual.
@@ -206,9 +206,9 @@ Fluxo de uso do disco:
 2. O pacote remoto é restaurado em `/kaggle/working/StyleTTS2/minha_voz_styletts2`.
 3. Os áudios brutos e processados existem apenas durante download, limpeza e preparação.
 4. O dataset final é criado em `/kaggle/working/super_Voz_styletts2_data`.
-5. O pacote inicial é sincronizado com Hugging Face por bucket ou repositorio fallback.
+5. O pacote inicial é materializado localmente, sem upload Hugging Face antes do treino.
 6. `Audios_brutos` e `Audios_processados` são apagados antes do treinamento.
-7. Durante o treino, cada checkpoint novo é detectado, copiado para `model/best_model.pth` e enviado ao Hugging Face; somente checkpoints anteriores ao último enviado são removidos.
+7. Durante o treino, cada checkpoint novo de epoca é detectado, copiado para `model/latest_checkpoint.pth` e enviado ao Hugging Face; `model/best_model.pth` só muda quando a validação melhora ou quando ainda não existe best.
 8. Se o upload falhar, o checkpoint local é preservado para não perder o treinamento.
 
 Arquivos que precisam permanecer no working durante o treino:
@@ -216,6 +216,8 @@ Arquivos que precisam permanecer no working durante o treino:
 ```text
 /kaggle/working/StyleTTS2
 /kaggle/working/super_Voz_styletts2_data
+/kaggle/working/StyleTTS2/Models/super_Voz/epoch_2nd_*.pth
+/kaggle/working/StyleTTS2/minha_voz_styletts2/model/latest_checkpoint.pth
 /kaggle/working/StyleTTS2/minha_voz_styletts2/model/best_model.pth
 ```
 
