@@ -175,6 +175,31 @@ O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar ini
 - O runner imprime keep-alive periodico no log do Kaggle durante o `accelerate`.
 - Se o treino F5 falhar depois de gerar checkpoint local, o runner tenta sincronizar o ultimo checkpoint antes de encerrar.
 
+## Atualização Resemble Enhance no Kaggle (08/06/2026)
+
+Durante a limpeza IA no Kaggle, o Resemble Enhance iniciou corretamente em arquivos com `degraded_voice`, mas alguns reparos falharam logo antes da gravação do WAV com:
+
+```text
+[ERRO ENHANCER] only 0-dimensional arrays can be converted to Python scalars
+```
+
+Diagnostico: a chamada `enhance` estava dentro do fluxo esperado da biblioteca, mas a borda de gravacao precisava tolerar retornos em formatos diferentes. A causa provavel era `hwav` ou `new_sr` chegando como tensor/array com shape inesperado, em vez de audio mono 1D e sample rate `int`.
+
+Correção aplicada em `limpeza_ia.py`:
+
+- normaliza a saida do Resemble antes de `soundfile.write`;
+- converte tensor/array para `float32`;
+- mistura canais para mono quando necessario;
+- achata o audio para 1D;
+- limpa `NaN`/`inf`;
+- limita pico acima de 1.0;
+- converte `new_sr` explicitamente para `int`;
+- passa `tau=0.5` explicitamente em `enhance`;
+- se `enhance` falhar por erro interno nao-CUDA, tenta `denoise` conservador antes de preservar o original;
+- permite diagnostico com `SUPER_VOZ_DEBUG_ENHANCER=1`.
+
+Se o enhancer ainda devolver saida vazia, escalar ou sample rate invalido, o pipeline continua seguro: rejeita a saida, preserva o original e aplica a padronizacao final 24 kHz/mono/PCM16 antes da transcricao.
+
 ## Atualização de Progresso no Kaggle (03/06/2026)
 
 O StyleTTS2 pode registrar as linhas de progresso apenas em `Models/super_Voz/train.log`, sem repassar essas linhas diretamente para o console do notebook. Para evitar a sensação de travamento:

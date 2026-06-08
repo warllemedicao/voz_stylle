@@ -307,6 +307,26 @@ Correcao aplicada:
 - Nesse modo, audios com `hissing` ou `background_noise` usam `denoise`, e `degraded_voice` usa `enhance`.
 - Se o Resemble falhar ou a saida for reprovada pelas validacoes de duracao/RMS/pico, o pipeline preserva o original e ainda aplica a padronizacao final segura.
 
+### Resemble iniciou mas falhou ao gravar a saida
+
+Sintoma observado no Kaggle:
+
+```text
+[RESEMBLE] Defeito principal: degraded_voice | Tratamento unico: enhance
+[ERRO ENHANCER] only 0-dimensional arrays can be converted to Python scalars
+```
+
+Esse erro aparece depois da chamada do enhancer e antes da padronizacao final. A causa provavel e retorno do Resemble em shape/tipo inesperado para a borda de gravacao: tensor/array multidimensional, canal extra ou `sample_rate` como array/tensor em vez de `int` Python.
+
+Correção aplicada:
+
+- `limpeza_ia.py` normaliza `hwav` antes de `soundfile.write`: tensor/array vira `float32`, canais sao misturados para mono quando necessario, o audio e achatado para 1D e valores NaN/inf sao zerados.
+- `new_sr` agora e convertido explicitamente para `int` e rejeitado se vier vazio, multidimensional ou invalido.
+- A chamada `enhance` passa `tau=0.5` explicitamente.
+- Se `enhance` quebrar por erro interno nao-CUDA, o script tenta `denoise` conservador antes de preservar o original.
+- Para ver stack trace curto no Kaggle, defina `SUPER_VOZ_DEBUG_ENHANCER=1` antes da limpeza.
+- Se a biblioteca ainda devolver uma saida invalida, o fluxo segue seguro: preserva o original e aplica a padronizacao final 24 kHz/mono/PCM16.
+
 ## Entrada de audios
 
 Ordem de busca:

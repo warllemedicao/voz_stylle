@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import sys
+import traceback
 import numpy as np
 import librosa
 import torch
@@ -239,15 +240,18 @@ class AudioEnhancer:
             with torch.inference_mode():
                 try:
                     hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, treatment, self.device_str)
-                except Exception as gpu_err:
-                    if self.device_str == "cuda" and is_cuda_runtime_error(gpu_err):
+                except Exception as first_err:
+                    if self.device_str == "cuda" and is_cuda_runtime_error(first_err):
                         print(f"  [AVISO] Falha CUDA em {input_path.name}. Usando Fallback CPU...")
                         hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, treatment, "cpu")
+                    elif treatment == "enhance":
+                        print(f"  [AVISO] Enhance falhou em {input_path.name}; tentando denoise conservador...")
+                        hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, "denoise", self.device_str)
                     else:
-                        raise gpu_err
+                        raise first_err
             
             # 6. Salvar resultado
-            audio_out = hwav.cpu().numpy()
+            audio_out, new_sr = self._prepare_audio_for_write(hwav, new_sr)
             sf.write(str(output_path), audio_out, new_sr)
             if not self._validar_saida(input_path, output_path):
                 print(f"  [AVISO] Saida do enhancer reprovada em {input_path.name}. Preservando original.")
@@ -255,6 +259,8 @@ class AudioEnhancer:
             return True
         except Exception as e:
             print(f"  [ERRO ENHANCER] {e}")
+            if os.environ.get("SUPER_VOZ_DEBUG_ENHANCER", "0") == "1":
+                traceback.print_exc(limit=8)
             return False
 
     def _select_treatment(self, defect: str) -> str:
@@ -265,7 +271,40 @@ class AudioEnhancer:
     def _run_resemble(self, denoise_fn, enhance_fn, dwav, sr, treatment: str, device: str):
         if treatment == "denoise":
             return denoise_fn(dwav, sr, device=device)
-        return enhance_fn(dwav, sr, device=device, nfe=32, solver="midpoint", lambd=0.5)
+        return enhance_fn(dwav, sr, device=device, nfe=32, solver="midpoint", lambd=0.5, tau=0.5)
+
+    def _prepare_audio_for_write(self, hwav, new_sr):
+        """Normaliza a saida do Resemble para WAV mono 1D seguro."""
+        if isinstance(new_sr, torch.Tensor):
+            new_sr = new_sr.detach().cpu().numpy()
+        if isinstance(new_sr, np.ndarray):
+            if new_sr.size != 1:
+                raise ValueError(f"sample rate invalido retornado pelo enhancer: shape={new_sr.shape}")
+            new_sr = new_sr.reshape(-1)[0]
+        new_sr = int(new_sr)
+        if new_sr <= 0:
+            raise ValueError(f"sample rate invalido retornado pelo enhancer: {new_sr}")
+
+        if isinstance(hwav, torch.Tensor):
+            audio_out = hwav.detach().cpu().float().numpy()
+        else:
+            audio_out = np.asarray(hwav, dtype=np.float32)
+
+        audio_out = np.squeeze(audio_out)
+        if audio_out.ndim == 0:
+            raise ValueError("enhancer retornou audio escalar/vazio")
+        if audio_out.ndim > 1:
+            audio_out = np.mean(audio_out, axis=0)
+        audio_out = np.asarray(audio_out, dtype=np.float32).reshape(-1)
+        if audio_out.size == 0:
+            raise ValueError("enhancer retornou audio vazio")
+        if not np.all(np.isfinite(audio_out)):
+            audio_out = np.nan_to_num(audio_out, nan=0.0, posinf=0.0, neginf=0.0)
+
+        peak = float(np.max(np.abs(audio_out)))
+        if peak > 1.0:
+            audio_out = audio_out / peak
+        return audio_out, new_sr
 
     def _validar_saida(self, input_path: Path, output_path: Path) -> bool:
         """Evita aceitar audio vazio, distorcido ou com duracao muito diferente."""

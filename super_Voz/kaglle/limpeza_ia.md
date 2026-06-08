@@ -1,5 +1,14 @@
 # Registro de Alterações: limpeza_ia.py
 
+## [2026-06-08] Normalizacao da saida do Resemble antes do WAV
+- Sintoma no Kaggle: o Resemble chegava a iniciar `enhance`, mas falhava com `[ERRO ENHANCER] only 0-dimensional arrays can be converted to Python scalars`.
+- Diagnostico: a falha e compativel com retorno do enhancer em formato nao escalar/nao 1D na borda de gravacao, ou `sample_rate` vindo como array/tensor em vez de `int` Python.
+- `AudioEnhancer` agora normaliza a saida antes de chamar `soundfile.write`: converte tensor/array para `float32`, faz squeeze, mistura canais para mono quando necessario, achata para 1D, remove NaN/inf, limita pico acima de 1.0 e converte `new_sr` para `int`.
+- A chamada de `enhance` tambem passa `tau=0.5` explicitamente, mantendo os parametros dentro da API esperada do Resemble.
+- Quando `enhance` falha por erro interno nao-CUDA, o script tenta `denoise` conservador antes de desistir do reparo.
+- Para diagnostico com stack trace curto, rode com `SUPER_VOZ_DEBUG_ENHANCER=1`.
+- Se o enhancer ainda retornar audio vazio, escalar ou sample rate invalido, a validacao falha de forma controlada e o pipeline preserva o original antes da padronizacao final.
+
 ## [2026-06-08] Dependencias da limpeza no modo Kaggle F5-TTS PT-BR
 - Diagnostico: no modo `tts_engine: "f5_tts_ptbr"`, o runner pulava o instalador legado `install_dependencies(style_dir)`, mas ainda chamava `limpeza_ia.py`.
 - Sintomas no Kaggle: `No module named 'onnxruntime'`, `No module named 'resemble_enhance'` e `ModuleNotFoundError: No module named 'whisper'` logo apos `Audios brutos importados do R2`.
