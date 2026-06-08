@@ -32,13 +32,13 @@ python -u scripts/run_kaggle_styletts2.py --config styletts2_kaggle_sem_cloudfla
 A configuracao atual usa `tts_engine: "f5_tts_ptbr"`. Nesse modo, o runner:
 
 1. baixa/limpa/transcreve os audios;
-2. restaura `libraries/f5_tts_ptbr` do Hugging Face ou baixa `firstpixel/F5-TTS-pt-br`;
+2. restaura `libraries/f5_tts_ptbr_tharyck` do Hugging Face ou baixa `Tharyck/multispeaker-ptbr-f5tts`;
 3. prepara o dataset no formato oficial do F5-TTS;
 4. roda fine-tuning usando o checkpoint PT-BR;
 5. exporta apenas os artefatos da voz neural para `minha_voz_f5_tts_ptbr`;
 6. envia o pacote da voz para `voices/minha_voz_f5_tts_ptbr`.
 
-A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote da voz em `voices/minha_voz_f5_tts_ptbr`.
+A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote da voz em `voices/minha_voz_f5_tts_ptbr`.
 
 Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
 
@@ -83,7 +83,14 @@ Impacto esperado se o runner for adaptado futuramente para esse candidato:
 - download maior, porque o repositorio Tharyck contem checkpoints grandes;
 - necessidade de ajustar `f5_tts_ptbr.repo_id`, `checkpoint_subpath` e a preparacao do dataset para copiar/usar o `vocab.txt` do modelo base em vez de gerar apenas o vocabulario pequeno do dataset atual.
 
-Recomendacao atual: manter a correcao ja aplicada para `firstpixel/F5-TTS-pt-br` e usar `Tharyck/multispeaker-ptbr-f5tts` como proximo experimento controlado, comparando audios gerados antes de trocar definitivamente o modelo base do pipeline.
+Decisao aplicada: `Tharyck/multispeaker-ptbr-f5tts` passou a ser a biblioteca/base padrao do fluxo Kaggle. A config usa `checkpoint_subpath: "model_last.safetensors"`, `base_vocab_subpath: "vocab.txt"`, `use_base_vocab: true` e `expected_vocab_rows: 2546`. O runner baixa apenas os arquivos necessarios da biblioteca para evitar transferir todos os checkpoints grandes, valida se o `vocab.txt` existe e substitui o `vocab.txt` pequeno gerado do dataset pelo vocabulario base antes de converter o checkpoint para o formato EMA do trainer.
+
+Impacto da mudanca:
+
+- o cache remoto mudou para `libraries/f5_tts_ptbr_tharyck`, evitando restaurar a biblioteca antiga `firstpixel`;
+- o treino passa a manter as 2546 linhas do embedding textual, em vez de reduzir a camada para o vocabulario pequeno da voz;
+- se o cache local/remoto nao tiver `model_last.safetensors` ou `vocab.txt`, o runner descarta esse cache e baixa a biblioteca correta;
+- se o `vocab.txt` baixado nao gerar 2546 linhas (`len(vocab) + 1`), o pipeline falha cedo antes do treino.
 
 ## Correcao do erro de dependencias da Limpeza IA no modo F5
 

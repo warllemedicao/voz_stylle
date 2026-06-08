@@ -91,7 +91,7 @@ Missing key(s): "initted", "step", "ema_model.transformer..."
 Unexpected key(s): "transformer..."
 ```
 
-A limpeza e o dataset ja tinham passado. A causa era o checkpoint PT-BR `pt-br/model_last.safetensors`: ele contem pesos crus `transformer.*`, mas o trainer do `f5-tts` espera um checkpoint EMA `ema_model.transformer.*` para `--pretrain`.
+A limpeza e o dataset ja tinham passado. Na configuracao anterior, a causa era o checkpoint PT-BR `pt-br/model_last.safetensors`: ele continha pesos crus `transformer.*`, mas o trainer do `f5-tts` esperava um checkpoint EMA `ema_model.transformer.*` para `--pretrain`. No fluxo atual com Tharyck, o mesmo conversor EMA continua ativo para `model_last.safetensors`.
 
 O runner agora converte o checkpoint antes do treino para:
 
@@ -119,13 +119,13 @@ copying a param with shape torch.Size([2546, 512]) from checkpoint,
 the shape in current model is torch.Size([56, 512])
 ```
 
-A causa e que o checkpoint PT-BR original pode ter um vocabulario maior que o tokenizer `char` criado para o dataset atual. O runner agora le `vocab.txt` depois de `prepare_csv_wavs.py`, calcula `len(vocab) + 1` linhas e ajusta `ema_model.transformer.text_embed.text_embed.weight` durante a conversao do pretrain. O convertido passa a usar o nome `pretrained_*_ema_vocab<N>.pt`, o que evita reutilizar caches antigos com embedding incompatível.
+A causa e que o checkpoint PT-BR original pode ter um vocabulario maior que o tokenizer `char` criado para o dataset atual. O fluxo atual usa `Tharyck/multispeaker-ptbr-f5tts`, que publica `vocab.txt`; depois de `prepare_csv_wavs.py`, o runner copia esse `vocab.txt` da biblioteca base para o dataset, calcula `len(vocab) + 1` linhas e ajusta `ema_model.transformer.text_embed.text_embed.weight` durante a conversao do pretrain apenas se houver divergencia. O convertido passa a usar o nome `pretrained_*_ema_vocab<N>.pt`, o que evita reutilizar caches antigos com embedding incompatível.
 
 No proximo log, procurar:
 
 ```text
-[F5-TTS-PT-BR] Embedding de texto do pretrain ajustado ao vocabulario atual: 2546 -> 56 linhas.
-[F5-TTS-PT-BR] Checkpoint pretrain compatível criado
+[F5-TTS-PT-BR] vocab.txt da biblioteca base aplicado ao dataset: ... (2546 linhas de embedding).
+[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: ...pretrained_model_last_ema_vocab2546.pt
 ```
 
 ### Caminho do `limpeza_ia.py`
@@ -346,7 +346,7 @@ O runner tenta restaurar automaticamente de caminhos como:
 /kaggle/input/super-voz/styletts2
 ```
 
-No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base LibriTTS em ingles. Ele restaura/baixa a biblioteca `libraries/f5_tts_ptbr`, faz o fine-tuning F5-TTS PT-BR e exporta a voz para `voices/minha_voz_f5_tts_ptbr`. A inferencia deve acontecer em outro programa que carregue esses artefatos.
+No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base LibriTTS em ingles. Ele restaura/baixa a biblioteca `libraries/f5_tts_ptbr_tharyck`, faz o fine-tuning F5-TTS PT-BR e exporta a voz para `voices/minha_voz_f5_tts_ptbr`. A inferencia deve acontecer em outro programa que carregue esses artefatos.
 
 O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, envia para Hugging Face apenas quando encontra checkpoint novo e estavel, e pula uploads quando nada mudou. O log tambem recebe mensagens de keep-alive durante o `accelerate` para manter a execucao visivel no Kaggle.
 

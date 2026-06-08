@@ -1018,22 +1018,94 @@ def upload_huggingface_subdir(hf_cfg: dict | None, local_dir: Path, remote_dir: 
     return True
 
 
+def config_string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def f5_library_vocab_path(library_dir: Path, f5_cfg: dict) -> Path | None:
+    subpath = str(f5_cfg.get("base_vocab_subpath", "vocab.txt")).strip()
+    if subpath:
+        candidate = library_dir / subpath
+        if candidate.exists():
+            return candidate
+
+    candidates = sorted(library_dir.rglob("vocab.txt"), key=lambda path: (len(path.parts), path.as_posix()))
+    return candidates[0] if candidates else None
+
+
+def count_f5_vocab_rows(vocab_path: Path) -> int:
+    tokens = [line for line in vocab_path.read_text(encoding="utf-8").splitlines() if line]
+    return len(tokens) + 1
+
+
+def validate_f5_library(library_dir: Path, f5_cfg: dict, *, strict: bool = False) -> bool:
+    if not library_dir.exists() or not any(library_dir.iterdir()):
+        if strict:
+            raise RuntimeError(f"Biblioteca F5-TTS PT-BR vazia ou inexistente: {library_dir}")
+        return False
+
+    checkpoint_ok = False
+    try:
+        f5_checkpoint_path(library_dir, f5_cfg)
+        checkpoint_ok = True
+    except FileNotFoundError as exc:
+        if strict:
+            raise RuntimeError(str(exc)) from exc
+
+    use_base_vocab = bool(f5_cfg.get("use_base_vocab", False))
+    vocab_ok = True
+    if use_base_vocab:
+        vocab_path = f5_library_vocab_path(library_dir, f5_cfg)
+        if not vocab_path:
+            if strict:
+                raise RuntimeError(
+                    f"f5_tts_ptbr.use_base_vocab=true, mas vocab.txt nao foi encontrado em {library_dir}."
+                )
+            vocab_ok = False
+        else:
+            rows = count_f5_vocab_rows(vocab_path)
+            expected_rows = f5_cfg.get("expected_vocab_rows")
+            if expected_rows and rows != int(expected_rows):
+                message = (
+                    f"vocab.txt da biblioteca F5 gera {rows} linhas de embedding, "
+                    f"mas a config espera {int(expected_rows)}."
+                )
+                if strict:
+                    raise RuntimeError(message)
+                print(f"[F5-TTS-PT-BR][AVISO] {message}")
+                vocab_ok = False
+
+    return checkpoint_ok and vocab_ok
+
+
 def ensure_f5_tts_ptbr_library(cfg: dict, hf_cfg: dict | None) -> Path | None:
     f5_cfg = cfg.get("f5_tts_ptbr", {}) or {}
     if not f5_cfg.get("enabled", False):
         return None
 
     default_root = Path(cfg.get("model_library_root", "/kaggle/working/super_voz_model_library"))
-    local_dir = Path(f5_cfg.get("local_dir", str(default_root / "f5_tts_ptbr")))
-    remote_dir = str(f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr")).strip("/")
-    repo_id = str(f5_cfg.get("repo_id", "firstpixel/F5-TTS-pt-br")).strip()
+    local_dir = Path(f5_cfg.get("local_dir", str(default_root / "f5_tts_ptbr_tharyck")))
+    remote_dir = str(f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr_tharyck")).strip("/")
+    repo_id = str(f5_cfg.get("repo_id", "Tharyck/multispeaker-ptbr-f5tts")).strip()
 
     if local_dir.exists() and any(local_dir.iterdir()):
-        print(f"[F5-TTS-PT-BR] Biblioteca local encontrada: {local_dir}")
-        return local_dir
+        if validate_f5_library(local_dir, f5_cfg):
+            print(f"[F5-TTS-PT-BR] Biblioteca local encontrada: {local_dir}")
+            return local_dir
+        print(f"[F5-TTS-PT-BR][AVISO] Biblioteca local incompatível; baixando novamente: {local_dir}")
+        shutil.rmtree(local_dir, ignore_errors=True)
 
-    if restore_huggingface_subdir(hf_cfg, remote_dir, local_dir):
+    if restore_huggingface_subdir(hf_cfg, remote_dir, local_dir) and validate_f5_library(local_dir, f5_cfg):
         return local_dir
+    if local_dir.exists() and any(local_dir.iterdir()):
+        print(f"[F5-TTS-PT-BR][AVISO] Biblioteca restaurada incompatível; baixando de {repo_id}.")
+        shutil.rmtree(local_dir, ignore_errors=True)
 
     if not repo_id:
         raise RuntimeError("f5_tts_ptbr.repo_id nao configurado e biblioteca nao foi restaurada do Hugging Face.")
@@ -1043,11 +1115,17 @@ def ensure_f5_tts_ptbr_library(cfg: dict, hf_cfg: dict | None) -> Path | None:
     from huggingface_hub import snapshot_download
 
     local_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
-    )
+    snapshot_kwargs = {
+        "repo_id": repo_id,
+        "local_dir": str(local_dir),
+        "local_dir_use_symlinks": False,
+    }
+    allow_patterns = config_string_list(f5_cfg.get("download_allow_patterns"))
+    if allow_patterns:
+        snapshot_kwargs["allow_patterns"] = allow_patterns
+        print(f"[F5-TTS-PT-BR] Download limitado aos arquivos: {', '.join(allow_patterns)}")
+    snapshot_download(**snapshot_kwargs)
+    validate_f5_library(local_dir, f5_cfg, strict=True)
     print(f"[F5-TTS-PT-BR] Biblioteca/base disponivel em: {local_dir}")
     upload_huggingface_subdir(hf_cfg, local_dir, remote_dir)
     return local_dir
@@ -1127,7 +1205,7 @@ def write_f5_metadata_csv(processed_dir: Path, out_csv: Path) -> int:
 
 
 def f5_checkpoint_path(library_dir: Path, f5_cfg: dict) -> Path:
-    subpath = str(f5_cfg.get("checkpoint_subpath", "pt-br/model_last.safetensors")).strip()
+    subpath = str(f5_cfg.get("checkpoint_subpath", "model_last.safetensors")).strip()
     checkpoint = library_dir / subpath
     if checkpoint.exists():
         return checkpoint
@@ -1175,6 +1253,32 @@ def f5_dataset_vocab_rows(dataset_dir: Path) -> int | None:
         print(f"[F5-TTS-PT-BR][AVISO] vocab.txt vazio em {vocab_path}; checkpoint pretrain nao sera ajustado ao vocabulario.")
         return None
     return len(tokens) + 1
+
+
+def apply_f5_base_vocab_to_dataset(f5_library_dir: Path, f5_dataset_dir: Path, f5_cfg: dict) -> None:
+    if not bool(f5_cfg.get("use_base_vocab", False)):
+        return
+
+    base_vocab = f5_library_vocab_path(f5_library_dir, f5_cfg)
+    if not base_vocab:
+        raise RuntimeError(
+            "f5_tts_ptbr.use_base_vocab=true, mas a biblioteca base nao contem vocab.txt. "
+            "Use uma biblioteca F5 completa com vocabulario publicado."
+        )
+
+    target_vocab = f5_dataset_dir / "vocab.txt"
+    shutil.copy2(base_vocab, target_vocab)
+    rows = count_f5_vocab_rows(target_vocab)
+    expected_rows = f5_cfg.get("expected_vocab_rows")
+    if expected_rows and rows != int(expected_rows):
+        raise RuntimeError(
+            f"vocab.txt base copiado de {base_vocab} gera {rows} linhas de embedding; "
+            f"esperado pela config: {int(expected_rows)}."
+        )
+    print(
+        "[F5-TTS-PT-BR] vocab.txt da biblioteca base aplicado ao dataset: "
+        f"{base_vocab} -> {target_vocab} ({rows} linhas de embedding)."
+    )
 
 
 def adapt_f5_text_embedding_to_vocab(state_dict: dict, target_rows: int | None) -> tuple[dict, bool]:
@@ -1541,8 +1645,8 @@ def materialize_f5_voice_package(
         "primary_language": "pt-BR",
         "inference_runtime_required": True,
         "base_library": {
-            "repo_id": f5_cfg.get("repo_id", "firstpixel/F5-TTS-pt-br"),
-            "huggingface_remote_dir": f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr"),
+            "repo_id": f5_cfg.get("repo_id", "Tharyck/multispeaker-ptbr-f5tts"),
+            "huggingface_remote_dir": f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr_tharyck"),
             "local_dir": str(f5_library_dir),
             "checkpoint": str(base_checkpoint.relative_to(f5_library_dir)) if f5_library_dir in base_checkpoint.parents else str(base_checkpoint),
         },
@@ -1557,7 +1661,8 @@ def materialize_f5_voice_package(
         "# super_Voz F5-TTS PT-BR\n\n"
         "Pacote de voz neural treinado/adaptado com F5-TTS PT-BR.\n\n"
         "Este pacote nao executa inferencia sozinho. O programa de inferencia deve carregar o runtime F5-TTS, "
-        "a biblioteca/base `libraries/f5_tts_ptbr` e o checkpoint desta voz em `model/`.\n",
+        f"a biblioteca/base `{f5_cfg.get('huggingface_remote_dir', 'libraries/f5_tts_ptbr_tharyck')}` "
+        "e o checkpoint desta voz em `model/`.\n",
         encoding="utf-8",
     )
 
@@ -1598,6 +1703,7 @@ def run_f5_tts_training(
     if bool(f5_cfg.get("prepare_as_pretrain", True)):
         prepare_cmd.append("--pretrain")
     run(prepare_cmd)
+    apply_f5_base_vocab_to_dataset(f5_library_dir, f5_dataset_dir, f5_cfg)
 
     checkpoint_dir = f5_package_path(f"../../ckpts/{dataset_name}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)

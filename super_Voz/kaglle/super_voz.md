@@ -163,12 +163,14 @@ O Colab pode interromper sessões por limite de uso de GPU antes das 50 epocas. 
 
 O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar iniciar vozes PT-BR a partir do LibriTTS em ingles.
 
-- A biblioteca/base F5-TTS PT-BR fica separada em `libraries/f5_tts_ptbr`.
-- Se essa biblioteca ainda nao existir no Hugging Face, o runner baixa `firstpixel/F5-TTS-pt-br` e envia para essa pasta.
+- A biblioteca/base F5-TTS PT-BR fica separada em `libraries/f5_tts_ptbr_tharyck`.
+- A base atual usa `Tharyck/multispeaker-ptbr-f5tts`, persistida em `libraries/f5_tts_ptbr_tharyck`, porque publica `vocab.txt`, `setting.json` e checkpoints compativeis com F5-TTS.
 - Os artefatos da voz neural ficam separados em `voices/minha_voz_f5_tts_ptbr`.
 - O projeto gera/exporta os arquivos da voz; a inferencia texto-para-audio deve ser feita por outro programa.
 - No modo F5, o fallback LibriTTS fica bloqueado.
-- Quando o checkpoint base PT-BR vem como `.safetensors` de pesos crus (`transformer.*`), o runner cria um checkpoint temporario em formato EMA (`ema_model.transformer.*`) antes do fine-tuning e remove caches `pretrained_*` antigos que poderiam ser escolhidos pelo trainer. Se o embedding de texto do checkpoint tiver mais linhas que o vocabulario `char` atual, o runner ajusta `ema_model.transformer.text_embed.text_embed.weight` para `len(vocab.txt) + 1` linhas durante a conversao.
+- O runner baixa apenas os arquivos necessarios da base Tharyck (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias) para evitar puxar todos os checkpoints grandes do repositorio.
+- Quando `use_base_vocab: true`, o runner copia o `vocab.txt` da biblioteca base para o dataset F5 depois de `prepare_csv_wavs.py`, mantendo as 2546 linhas do embedding textual (`len(vocab) + 1`) em vez de reduzir a camada para o vocabulario pequeno da voz.
+- Quando o checkpoint base PT-BR vem como `.safetensors` de pesos crus (`transformer.*`), o runner cria um checkpoint temporario em formato EMA (`ema_model.transformer.*`) antes do fine-tuning e remove caches `pretrained_*` antigos que poderiam ser escolhidos pelo trainer. Se o embedding de texto do checkpoint divergir do vocabulario ativo, o runner ajusta `ema_model.transformer.text_embed.text_embed.weight` para `len(vocab.txt) + 1` linhas durante a conversao.
 - O monitor F5 procura checkpoint novo durante o treino e envia para Hugging Face apenas quando o arquivo novo esta estavel.
 - O runner imprime keep-alive periodico no log do Kaggle durante o `accelerate`.
 - Se o treino F5 falhar depois de gerar checkpoint local, o runner tenta sincronizar o ultimo checkpoint antes de encerrar.
@@ -240,7 +242,7 @@ Arquivos que precisam permanecer no working durante o treino:
 
 O pacote também contém `data_reference/wavs`, mas esses WAVs são criados por hard link para o dataset final quando o sistema de arquivos permite. Assim, eles aparecem em duas pastas sem ocupar o dobro do espaço físico.
 
-No modo atual F5-TTS PT-BR, o maior pico de uso vem da biblioteca/base `firstpixel/F5-TTS-pt-br`, do dataset preparado e dos checkpoints da voz. O checkpoint base LibriTTS nao e baixado nesse modo.
+No modo atual F5-TTS PT-BR, o maior pico de uso vem da biblioteca/base `Tharyck/multispeaker-ptbr-f5tts`, do dataset preparado e dos checkpoints da voz. O runner limita o download da biblioteca aos arquivos necessarios para nao baixar todos os checkpoints do repositorio. O checkpoint base LibriTTS nao e baixado nesse modo.
 
 Mensagens com prefixo `[DISCO]` mostram o espaço usado e livre no início, antes do treino, depois da limpeza dos intermediários, após falhas de upload e após a sincronização final.
 

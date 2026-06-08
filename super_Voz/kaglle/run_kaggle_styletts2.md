@@ -56,12 +56,15 @@ tts_engine: "f5_tts_ptbr"
 model_library_root: "/kaggle/working/super_voz_model_library"
 f5_voice_package_dir: "minha_voz_f5_tts_ptbr"
 f5_tts_ptbr:
-  repo_id: "firstpixel/F5-TTS-pt-br"
-  local_dir: "/kaggle/working/super_voz_model_library/f5_tts_ptbr"
-  huggingface_remote_dir: "libraries/f5_tts_ptbr"
+  repo_id: "Tharyck/multispeaker-ptbr-f5tts"
+  local_dir: "/kaggle/working/super_voz_model_library/f5_tts_ptbr_tharyck"
+  huggingface_remote_dir: "libraries/f5_tts_ptbr_tharyck"
   dataset_name: "super_voz_f5_ptbr"
-  checkpoint_subpath: "pt-br/model_last.safetensors"
-  exp_name: "F5TTS_Base"
+  checkpoint_subpath: "model_last.safetensors"
+  base_vocab_subpath: "vocab.txt"
+  use_base_vocab: true
+  expected_vocab_rows: 2546
+  exp_name: "F5TTS_v1_Base"
   tokenizer: "char"
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30
@@ -69,17 +72,17 @@ f5_tts_ptbr:
   keepalive_interval_seconds: 120
 ```
 
-Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr` do Hugging Face. Se a pasta ainda nao existir, baixa `firstpixel/F5-TTS-pt-br` e envia a biblioteca para essa pasta remota. Os checkpoints/artefatos da voz F5 devem ficar separados no pacote `minha_voz_f5_tts_ptbr`, enquanto o pacote legado `minha_voz_styletts2` continua reservado para StyleTTS2.
+Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr_tharyck` do Hugging Face. Se a pasta ainda nao existir ou estiver incompatível, baixa `Tharyck/multispeaker-ptbr-f5tts` e envia a biblioteca para essa pasta remota. O download e limitado aos arquivos necessarios (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias), evitando puxar todos os checkpoints grandes do repositorio. Os checkpoints/artefatos da voz F5 ficam separados no pacote `minha_voz_f5_tts_ptbr`, enquanto o pacote legado `minha_voz_styletts2` continua reservado para StyleTTS2.
 
 Enquanto `tts_engine: "f5_tts_ptbr"` estiver ativo, o fallback LibriTTS em ingles fica bloqueado quando nao houver checkpoint anterior. Isso evita iniciar uma nova voz PT-BR a partir de `yl4579/StyleTTS2-LibriTTS`.
 
-Antes do fine-tuning, o runner valida o checkpoint base configurado em `checkpoint_subpath`. Quando o arquivo e um `.safetensors` com pesos crus `transformer.*`, ele cria um checkpoint temporario compativel com o trainer em `ckpts/<dataset_name>/pretrained_*_ema_vocab<N>.pt`, usando chaves `ema_model.transformer.*` e buffers `initted`/`step`. A gravacao desse checkpoint usa a serializacao legada do `torch.save`, evitando a falha de runtimes Kaggle inconsistentes com `ModuleNotFoundError: No module named 'torch.utils.serialization'`. Depois que `prepare_csv_wavs.py` cria `vocab.txt`, a conversao tambem ajusta `ema_model.transformer.text_embed.text_embed.weight` para `len(vocab) + 1` linhas, evitando `size mismatch` entre vocabulario 2546 do checkpoint base e vocabulario pequeno do tokenizer `char` atual. O diretorio `ckpts/<dataset_name>` tambem tem `pretrained_*` antigos removidos antes dessa etapa, evitando que o trainer reutilize um cache cru ou com vocabulario incompatível. Isso evita os erros `Missing key(s) ... ema_model.transformer` e `size mismatch ... text_embed.weight` ao iniciar `accelerate launch`.
+Antes do fine-tuning, o runner valida o checkpoint base configurado em `checkpoint_subpath` e exige `vocab.txt` quando `use_base_vocab: true`. Depois que `prepare_csv_wavs.py` cria o dataset, o runner substitui o `vocab.txt` pequeno gerado do dataset pelo `vocab.txt` publicado pela base Tharyck. Assim o treino mantém as 2546 linhas do embedding textual do modelo completo em vez de reduzir para o vocabulário pequeno da amostra da voz. Quando o checkpoint e um `.safetensors` com pesos crus `transformer.*`, o runner cria um checkpoint temporario compativel com o trainer em `ckpts/<dataset_name>/pretrained_*_ema_vocab2546.pt`, usando chaves `ema_model.transformer.*` e buffers `initted`/`step`. A gravacao desse checkpoint usa a serializacao legada do `torch.save`, evitando a falha de runtimes Kaggle inconsistentes com `ModuleNotFoundError: No module named 'torch.utils.serialization'`. O diretorio `ckpts/<dataset_name>` tambem tem `pretrained_*` antigos removidos antes dessa etapa, evitando que o trainer reutilize um cache cru ou com vocabulario incompatível. Isso evita os erros `Missing key(s) ... ema_model.transformer` e `size mismatch ... text_embed.weight` ao iniciar `accelerate launch`.
 
 Mesmo no modo F5, a etapa `limpeza_ia.py` continua obrigatoria antes do dataset. Por isso o runner instala dependencias de limpeza em um bloco proprio (`install_audio_cleaning_dependencies()`), separado do instalador legado do StyleTTS2. Esse bloco deve aparecer no log antes de `[INFO] Iniciando Limpeza IA` e cobre `openai-whisper`, `onnxruntime-gpu`, `deepspeed`, `resemble-enhance` quando habilitado, e bibliotecas de audio como `librosa` e `soundfile`.
 
 Em GPU Kaggle P100/K80, o fluxo F5 tambem precisa do pin de runtime ML que antes existia apenas no caminho StyleTTS2. O runner chama `install_ml_runtime_dependencies()` antes da limpeza e depois da instalacao de `f5-tts`; para `sm_<7`, ele fixa `torch==2.5.1`, `torchaudio==2.5.1`, `torchvision==0.20.1` e `transformers==4.46.3`. Se o log mostrar `sm_60 is not compatible with the current PyTorch installation`, a proxima checagem e procurar `--- Instalando Runtime ML compatível ---` e a mensagem `GPU sm_60 detectada; fixando Torch 2.5.1`. A limpeza tambem testa uma operacao CUDA real antes de carregar Whisper; se a GPU falhar com `no kernel image is available`, Whisper/Resemble caem para CPU em vez de abortar.
 
-Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote `voices/minha_voz_f5_tts_ptbr`.
+Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote `voices/minha_voz_f5_tts_ptbr`.
 
 Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, o pacote parcial da voz e materializado e enviado para `voices/minha_voz_f5_tts_ptbr`. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
 
@@ -210,7 +213,7 @@ Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` 
 da execucao anterior e os WAVs antigos do pacote sao removidos antes de recriar a versao atual.
 Mensagens `[DISCO]` mostram o espaco usado e livre durante o pipeline.
 No modo atual F5-TTS PT-BR, o checkpoint base LibriTTS nao e baixado. A base PT-BR fica em
-`libraries/f5_tts_ptbr` e os artefatos da voz ficam em `voices/minha_voz_f5_tts_ptbr`.
+`libraries/f5_tts_ptbr_tharyck` e os artefatos da voz ficam em `voices/minha_voz_f5_tts_ptbr`.
 
 Quando o backend usado for `hf buckets sync` ou `hf sync`, o upload usa `--delete`, portanto o
 bucket nao acumula artefatos removidos do pacote. Quando a CLI do Kaggle nao oferece suporte a
