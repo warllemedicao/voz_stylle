@@ -1164,6 +1164,15 @@ def normalize_f5_ema_state_dict(state_dict: dict) -> dict:
     return normalized
 
 
+def save_f5_trainer_checkpoint(checkpoint: dict, destination: Path) -> None:
+    import torch
+
+    try:
+        torch.save(checkpoint, destination, _use_new_zipfile_serialization=False)
+    except TypeError:
+        torch.save(checkpoint, destination)
+
+
 def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -> Path:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     converted = checkpoint_dir / f"pretrained_{base_checkpoint.stem}_ema.pt"
@@ -1188,7 +1197,7 @@ def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -
 
         raw_state = load_file(str(base_checkpoint), device="cpu")
         checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(raw_state)}
-        torch.save(checkpoint, converted)
+        save_f5_trainer_checkpoint(checkpoint, converted)
         print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
         return converted
 
@@ -1201,7 +1210,7 @@ def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -
             return base_checkpoint
         if isinstance(loaded, dict):
             checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(loaded)}
-            torch.save(checkpoint, converted)
+            save_f5_trainer_checkpoint(checkpoint, converted)
             print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
             return converted
 
