@@ -137,6 +137,7 @@ Isso evita aplicar uma cadeia ampla de efeitos em todos os arquivos. O objetivo 
 - No Kaggle com `tts_engine: "f5_tts_ptbr"`, essa etapa tambem exige instalacao propria das dependencias da limpeza. O runner agora chama `install_audio_cleaning_dependencies()` antes de `limpeza_ia.py`; se `onnxruntime`, `resemble_enhance`, `whisper` ou outra biblioteca usada nao ficar disponivel apos instalacao, o processo aborta antes do dataset.
 - A politica atual e falhar cedo quando dependencia essencial falha: runtime ML, F5-TTS, limpeza/transcricao, DNSMOS/ONNX, Resemble e comandos de audio sao verificados apos instalacao. TeraBox e restores/uploads alternativos continuam opcionais.
 - Em P100/K80, `torch.cuda.is_available()` pode ser verdadeiro mesmo quando o PyTorch instalado nao tem kernel para a arquitetura da GPU. A limpeza agora faz um teste CUDA real antes de carregar Whisper/Resemble; se aparecer `no kernel image is available`, usa CPU nessa etapa em vez de encerrar o pipeline.
+- Quando o runner troca o stack `torch/torchaudio/torchvision` para compatibilidade P100, ele valida em subprocesso limpo e reinicia a si mesmo uma vez. Isso evita falso erro de ABI causado por `torch` antigo ja importado no processo que chamou `pip install`.
 
 ### 4. Preparação StyleTTS2
 - `prepare_styletts2_dataset.py` converte `Audios_processados` para listas do StyleTTS2.

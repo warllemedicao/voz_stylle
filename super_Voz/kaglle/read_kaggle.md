@@ -65,6 +65,21 @@ No proximo log, conferir:
 GPU sm_60 detectada; fixando Torch 2.5.1
 ```
 
+Se logo depois do `pip install` aparecer:
+
+```text
+torchaudio ... Could not load ... libtorchaudio.so
+torchvision ... operator torchvision::nms does not exist
+```
+
+a causa provavel e o runner ter importado `torch` para detectar a GPU e depois trocar `torch/torchaudio/torchvision` com `pip` no mesmo processo Python. A verificacao agora roda em subprocesso limpo e, se passar, o runner reinicia a si mesmo uma vez com `SUPER_VOZ_ML_RUNTIME_REEXECED=1` para recarregar o stack ML instalado no disco.
+
+No log corrigido deve aparecer:
+
+```text
+Runtime ML atualizado; reiniciando o runner para recarregar Torch/Torchaudio/Torchvision.
+```
+
 e depois, dentro da limpeza, uma destas linhas:
 
 ```text

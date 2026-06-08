@@ -155,6 +155,24 @@ O fluxo Kaggle nao deve mais continuar quando uma biblioteca usada pela limpeza,
 
 Excecoes mantidas como tolerantes: TeraBox, alternativas de restore/upload Hugging Face e comandos de git para atualizar clone existente. Esses itens sao persistencia/sincronizacao opcional ou recuperacao de cache, nao bibliotecas obrigatorias do runtime.
 
+## Correcao do falso erro `torchaudio`/`torchvision` apos instalar Torch
+
+Erro observado em P100 logo apos `pip install torch==2.5.1 torchaudio==2.5.1 torchvision==0.20.1`:
+
+```text
+torchaudio: Could not load ... libtorchaudio.so
+torchvision: operator torchvision::nms does not exist
+```
+
+Causa: o runner ja tinha importado `torch` para detectar a GPU e decidir o pin de P100. Depois disso, instalava outro stack Torch no mesmo processo Python e tentava validar `torchaudio`/`torchvision` nesse processo ainda contaminado pelo modulo Torch antigo em memoria.
+
+Correcao aplicada:
+
+- a verificacao do runtime ML agora roda em subprocesso Python limpo;
+- se a verificacao passar, o runner faz `os.execv` e reinicia a si mesmo uma vez;
+- `SUPER_VOZ_ML_RUNTIME_REEXECED=1` evita loop de reinicio;
+- apos o reinicio, a limpeza e o treino carregam `torch`, `torchaudio` e `torchvision` das versoes instaladas no disco.
+
 ## Correcao do erro de checkpoint F5 sem `ema_model_state_dict`
 
 Erro observado depois da limpeza e da preparacao do dataset F5:

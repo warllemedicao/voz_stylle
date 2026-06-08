@@ -53,6 +53,58 @@ def require_python_modules(modules: dict[str, str], exact_versions: dict[str, st
         raise RuntimeError("Dependencias obrigatorias ausentes/incompativeis: " + "; ".join(missing))
 
 
+def require_python_modules_in_fresh_process(
+    modules: dict[str, str],
+    exact_versions: dict[str, str] | None = None,
+) -> None:
+    exact_versions = exact_versions or {}
+    payload = json.dumps({"modules": modules, "exact_versions": exact_versions})
+    code = r"""
+import importlib
+import importlib.metadata
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+missing = []
+for module_name, package_name in payload["modules"].items():
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        missing.append(f"{module_name} ({package_name}): {exc}")
+        continue
+    expected = payload["exact_versions"].get(package_name)
+    if expected:
+        try:
+            installed = importlib.metadata.version(package_name)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(f"{module_name} ({package_name}=={expected}, versao indisponivel)")
+            continue
+        if installed != expected:
+            missing.append(f"{package_name}=={expected} requerido, instalado={installed}")
+if missing:
+    print("; ".join(missing))
+    raise SystemExit(1)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, payload],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Dependencias obrigatorias ausentes/incompativeis: " + result.stdout.strip())
+
+
+def reexec_after_ml_runtime_install() -> None:
+    if os.environ.get("SUPER_VOZ_ML_RUNTIME_REEXECED", "0") == "1":
+        return
+    os.environ["SUPER_VOZ_ML_RUNTIME_REEXECED"] = "1"
+    print("[INFO] Runtime ML atualizado; reiniciando o runner para recarregar Torch/Torchaudio/Torchvision.")
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 def run_training_with_progress(cmd, cwd=None) -> None:
     print("\n$ " + " ".join(map(str, cmd)))
     if cwd:
@@ -483,7 +535,7 @@ def install_ml_runtime_dependencies() -> None:
         *transformer_packages,
         "accelerate",
     ])
-    require_python_modules(
+    require_python_modules_in_fresh_process(
         {
             "torch": "torch",
             "torchaudio": "torchaudio",
@@ -492,6 +544,7 @@ def install_ml_runtime_dependencies() -> None:
             "accelerate": "accelerate",
         }
     )
+    reexec_after_ml_runtime_install()
 
 
 RESEMBLE_COMPAT_PACKAGES = [
