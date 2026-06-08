@@ -65,6 +65,7 @@ f5_tts_ptbr:
   tokenizer: "char"
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30
+  local_checkpoint_keep_last: 2
   keepalive_interval_seconds: 120
 ```
 
@@ -77,6 +78,8 @@ Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arq
 Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, o pacote parcial da voz e materializado e enviado para `voices/minha_voz_f5_tts_ptbr`. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
 
 Se o processo de treino falhar depois de algum checkpoint local existir, o runner ainda tenta sincronizar o ultimo checkpoint antes de encerrar. Se o monitor ja tiver enviado exatamente esse checkpoint, o upload final duplicado e pulado.
+
+Apos upload confirmado de checkpoint F5, a retencao local remove checkpoints antigos e mantem apenas os `local_checkpoint_keep_last` mais recentes, por padrao 2. Isso evita acumulo de checkpoints no `/kaggle/working`.
 
 ## Entrada de audios
 

@@ -1141,6 +1141,45 @@ def latest_f5_checkpoint(checkpoint_dir: Path) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
 
 
+def list_f5_checkpoints(checkpoint_dir: Path) -> list[Path]:
+    if not checkpoint_dir or not checkpoint_dir.exists():
+        return []
+    checkpoints = [
+        path
+        for path in checkpoint_dir.rglob("*")
+        if path.is_file()
+        and path.suffix.lower() in {".pt", ".pth", ".safetensors"}
+        and not path.name.startswith("pretrained_")
+    ]
+    return sorted(checkpoints, key=lambda path: (path.stat().st_mtime_ns, path.name))
+
+
+def prune_f5_uploaded_checkpoints(checkpoint_dir: Path, keep_last: int = 2) -> tuple[int, int]:
+    checkpoints = list_f5_checkpoints(checkpoint_dir)
+    if keep_last <= 0 or len(checkpoints) <= keep_last:
+        return 0, 0
+
+    keep = {path.resolve() for path in checkpoints[-keep_last:]}
+    removed = 0
+    recovered = 0
+    for path in checkpoints:
+        if path.resolve() in keep:
+            continue
+        size = path.stat().st_size
+        freed = removable_file_bytes(path)
+        path.unlink()
+        removed += 1
+        recovered += freed
+        print(
+            "[DISCO][F5] Checkpoint local antigo removido apos upload confirmado: "
+            f"{path.name} ({format_bytes(size)}, liberado {format_bytes(freed)})"
+        )
+
+    if removed:
+        print(f"[DISCO][F5] Retencao local manteve os {keep_last} checkpoint(s) mais recentes e recuperou {format_bytes(recovered)}.")
+    return removed, recovered
+
+
 def is_stable_file(path: Path, min_age_seconds: int = 30) -> bool:
     if not path.exists() or path.stat().st_size <= 0:
         return False
@@ -1196,6 +1235,7 @@ def start_f5_checkpoint_sync(
     checkpoint_dir: Path,
     poll_interval_seconds: int,
     stable_seconds: int,
+    keep_last_checkpoints: int,
 ) -> tuple[threading.Event, threading.Thread] | tuple[None, None]:
     if not hf_cfg:
         return None, None
@@ -1225,6 +1265,7 @@ def start_f5_checkpoint_sync(
                 ):
                     last_uploaded = current_state
                     f5_cfg["_last_uploaded_checkpoint"] = current_state
+                    prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
             except Exception as exc:
                 print(f"[F5-TTS-PT-BR][AVISO] Falha no monitor de checkpoint: {exc}")
 
@@ -1407,6 +1448,7 @@ def run_f5_tts_training(
     sync_stop = None
     sync_thread = None
     training_error: Exception | None = None
+    keep_last_checkpoints = max(1, int(f5_cfg.get("local_checkpoint_keep_last", 2)))
     try:
         sync_stop, sync_thread = start_f5_checkpoint_sync(
             hf_cfg,
@@ -1419,6 +1461,7 @@ def run_f5_tts_training(
             checkpoint_dir,
             max(30, int(f5_cfg.get("checkpoint_sync_interval_seconds", 300))),
             max(5, int(f5_cfg.get("checkpoint_stable_seconds", 30))),
+            keep_last_checkpoints,
         )
         run_with_keepalive(
             train_cmd,
@@ -1460,6 +1503,7 @@ def run_f5_tts_training(
         reason="sincronizacao final",
     ):
         f5_cfg["_last_uploaded_checkpoint"] = final_state
+        prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
     print(f"[F5-TTS-PT-BR] Pacote da voz neural pronto em: {package_dir}")
     if training_error:
         raise training_error
