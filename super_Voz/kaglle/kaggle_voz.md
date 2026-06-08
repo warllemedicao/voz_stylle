@@ -64,8 +64,31 @@ Correcao aplicada:
 
 - `scripts/run_kaggle_styletts2.py` agora tem `install_audio_cleaning_dependencies()`.
 - No ramo `f5_tts_ptbr`, o runner chama esse instalador antes de baixar/processar os audios com `limpeza_ia.py`.
-- O instalador cobre `openai-whisper`, `onnxruntime-gpu`, `librosa`, `soundfile`, `demucs`, `scipy`, `tqdm` e `resemble-enhance` quando `enable_resemble_enhance: true`.
+- O instalador cobre `openai-whisper`, `onnxruntime-gpu`, `librosa`, `soundfile`, `demucs`, `deepspeed`, `scipy`, `tqdm` e `resemble-enhance` quando `enable_resemble_enhance: true`.
 - Para diagnosticos futuros: se o erro citar modulo ausente dentro de `limpeza_ia.py`, verificar primeiro se o fluxo ativo e `f5_tts_ptbr` e se `install_audio_cleaning_dependencies()` apareceu no log antes de `[INFO] Iniciando Limpeza IA`.
+
+## Correcao do erro `No module named 'deepspeed'` no Resemble
+
+Erro observado:
+
+```text
+[INFO] Carregando Resemble Enhance na GPU (cuda)...
+[AVISO] Falha ao carregar Resemble na GPU: No module named 'deepspeed'
+[ERRO ENHANCER] No module named 'deepspeed'
+```
+
+Diagnostico:
+
+- A limpeza, o Whisper e a padronizacao final continuavam funcionando; o pipeline preservava o original e seguia.
+- A falha era limitada ao Resemble Enhance, instalado com `--no-deps` para preservar Torch/Torchaudio do Kaggle.
+- No fluxo legado StyleTTS2, `deepspeed` ja era instalado junto com as dependencias completas.
+- No fluxo F5, `install_audio_cleaning_dependencies()` ainda nao incluia `deepspeed`, entao o import interno do Resemble falhava.
+
+Correcao aplicada:
+
+- `install_audio_cleaning_dependencies()` agora instala `deepspeed` junto das dependencias da limpeza.
+- O runner define `DS_BUILD_OPS=0` tambem nesse instalador para evitar compilacao pesada de extensoes DeepSpeed no Kaggle.
+- Para diagnosticos futuros: se Resemble falhar com modulo ausente, verificar se o modulo esta na lista explicita do instalador da limpeza, porque `resemble-enhance --no-deps` nao instala suas dependencias automaticamente.
 
 ## Correcao preventiva para GPU P100 no modo F5
 

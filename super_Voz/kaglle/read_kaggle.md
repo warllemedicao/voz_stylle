@@ -70,6 +70,17 @@ e depois, dentro da limpeza, uma destas linhas:
 Whisper/Resemble usarao CPU
 ```
 
+### Resemble sem `deepspeed`
+
+Falha observada durante restauração de áudio:
+
+```text
+[AVISO] Falha ao carregar Resemble na GPU: No module named 'deepspeed'
+[ERRO ENHANCER] No module named 'deepspeed'
+```
+
+Isso nao quebra Whisper nem a padronizacao final; o script preserva o original e segue. A causa e que `resemble-enhance` e instalado com `--no-deps` para nao trocar Torch/Torchaudio, entao o runner precisa instalar explicitamente dependencias usadas internamente. O instalador da Limpeza IA agora inclui `deepspeed` e define `DS_BUILD_OPS=0`.
+
 ### Caminho do `limpeza_ia.py`
 
 O Kaggle falhou com:

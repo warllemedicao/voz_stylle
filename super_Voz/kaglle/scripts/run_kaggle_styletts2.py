@@ -536,6 +536,7 @@ def install_audio_cleaning_dependencies() -> None:
         run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"], check=False)
 
     print("[INFO] Verificando/Instalando dependências Python da limpeza...")
+    os.environ["DS_BUILD_OPS"] = "0"
     run([sys.executable, "-m", "pip", "uninstall", "-y", "onnxruntime", "onnxruntime-gpu"], check=False)
     run([
         sys.executable,
@@ -548,6 +549,7 @@ def install_audio_cleaning_dependencies() -> None:
         "openai-whisper",
         "demucs",
         "onnxruntime-gpu",
+        "deepspeed",
         "scipy",
         "tqdm",
     ])

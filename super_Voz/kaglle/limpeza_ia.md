@@ -14,6 +14,12 @@
 - Se o teste ou o carregamento do Whisper falhar por erro CUDA de runtime, a limpeza recarrega Whisper em CPU e chama `transcribe(..., fp16=False)`.
 - O `AudioEnhancer` recebe o mesmo device seguro. Se Resemble falhar em CUDA por erro de runtime, tenta fallback CPU para aquele arquivo.
 
+## [2026-06-08] Dependencia `deepspeed` para Resemble no fluxo F5
+- Sintoma: `Falha ao carregar Resemble na GPU: No module named 'deepspeed'`.
+- A limpeza continuava funcional porque preservava o original, padronizava o audio e transcrevia com Whisper.
+- A causa era `resemble-enhance --no-deps`; isso preserva Torch/Torchaudio, mas exige que dependencias internas sejam instaladas explicitamente.
+- `install_audio_cleaning_dependencies()` agora inclui `deepspeed` e define `DS_BUILD_OPS=0` para evitar compilacao pesada de ops no Kaggle.
+
 ## [2026-06-05] Observacao do runner Kaggle
 - A limpeza de audio continua independente da retencao de checkpoints, mas o fluxo Kaggle foi ajustado para evitar falso sucesso de treino.
 - O runner mantem o checkpoint mais recente em `Models/super_Voz` apos upload e remove apenas checkpoints anteriores quando um checkpoint mais novo ja foi persistido.
