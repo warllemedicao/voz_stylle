@@ -134,7 +134,8 @@ Isso evita aplicar uma cadeia ampla de efeitos em todos os arquivos. O objetivo 
   - trim de silêncio;
   - normalização.
 - Transcreve com Whisper e gera `train.txt`.
-- No Kaggle com `tts_engine: "f5_tts_ptbr"`, essa etapa tambem exige instalacao propria das dependencias da limpeza. O runner agora chama `install_audio_cleaning_dependencies()` antes de `limpeza_ia.py`; se o log mostrar `No module named 'onnxruntime'`, `No module named 'resemble_enhance'` ou `No module named 'whisper'`, verificar primeiro se esse bloco de instalacao apareceu antes de `[INFO] Iniciando Limpeza IA`.
+- No Kaggle com `tts_engine: "f5_tts_ptbr"`, essa etapa tambem exige instalacao propria das dependencias da limpeza. O runner agora chama `install_audio_cleaning_dependencies()` antes de `limpeza_ia.py`; se `onnxruntime`, `resemble_enhance`, `whisper` ou outra biblioteca usada nao ficar disponivel apos instalacao, o processo aborta antes do dataset.
+- A politica atual e falhar cedo quando dependencia essencial falha: runtime ML, F5-TTS, limpeza/transcricao, DNSMOS/ONNX, Resemble e comandos de audio sao verificados apos instalacao. TeraBox e restores/uploads alternativos continuam opcionais.
 - Em P100/K80, `torch.cuda.is_available()` pode ser verdadeiro mesmo quando o PyTorch instalado nao tem kernel para a arquitetura da GPU. A limpeza agora faz um teste CUDA real antes de carregar Whisper/Resemble; se aparecer `no kernel image is available`, usa CPU nessa etapa em vez de encerrar o pipeline.
 
 ### 4. Preparação StyleTTS2
@@ -199,6 +200,8 @@ Correção aplicada em `limpeza_ia.py`:
 - permite diagnostico com `SUPER_VOZ_DEBUG_ENHANCER=1`.
 
 Se o enhancer ainda devolver saida vazia, escalar ou sample rate invalido, o pipeline continua seguro: rejeita a saida, preserva o original e aplica a padronizacao final 24 kHz/mono/PCM16 antes da transcricao.
+
+Atualizacao do mesmo dia: em logs como `Enhance falhou ... tentando denoise conservador...` seguido de `[WHISPER] Transcrevendo...`, o pipeline nao voltou ao erro antigo completo. O fallback `denoise` foi executado e aceito, mas a causa precisava ser corrigida. A falha do `enhance` vem do CFM do `resemble-enhance`, que chama `float(scipy.optimize.fsolve(...))`; com NumPy 2.x essa conversao de array 1D para escalar falha. O runner agora instala os pins criticos declarados pelo wheel do Resemble (`numpy==1.26.2`, `scipy==1.11.4` e dependencias auxiliares) antes de instalar `resemble-enhance --no-deps`. A limpeza tambem imprime `[RESEMBLE][VERSOES]` para confirmar o ambiente real no Kaggle.
 
 ## Atualização de Progresso no Kaggle (03/06/2026)
 

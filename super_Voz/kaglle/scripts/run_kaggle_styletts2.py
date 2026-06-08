@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import importlib
+import importlib.metadata
 import json
 import os
 import re
@@ -21,6 +23,34 @@ def run(cmd, cwd=None, check=True, display_cmd=None):
     if cwd:
         print("cwd:", cwd)
     return subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=check)
+
+
+def require_commands(commands: list[str]) -> None:
+    missing = [command for command in commands if shutil.which(command) is None]
+    if missing:
+        raise RuntimeError("Comandos obrigatorios ausentes apos instalacao: " + ", ".join(missing))
+
+
+def require_python_modules(modules: dict[str, str], exact_versions: dict[str, str] | None = None) -> None:
+    exact_versions = exact_versions or {}
+    missing = []
+    for module_name, package_name in modules.items():
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            missing.append(f"{module_name} ({package_name}): {exc}")
+            continue
+        expected = exact_versions.get(package_name)
+        if expected:
+            try:
+                installed = importlib.metadata.version(package_name)
+            except importlib.metadata.PackageNotFoundError:
+                missing.append(f"{module_name} ({package_name}=={expected}, versao indisponivel)")
+                continue
+            if installed != expected:
+                missing.append(f"{package_name}=={expected} requerido, instalado={installed}")
+    if missing:
+        raise RuntimeError("Dependencias obrigatorias ausentes/incompativeis: " + "; ".join(missing))
 
 
 def run_training_with_progress(cmd, cwd=None) -> None:
@@ -453,6 +483,56 @@ def install_ml_runtime_dependencies() -> None:
         *transformer_packages,
         "accelerate",
     ])
+    require_python_modules(
+        {
+            "torch": "torch",
+            "torchaudio": "torchaudio",
+            "torchvision": "torchvision",
+            "transformers": "transformers",
+            "accelerate": "accelerate",
+        }
+    )
+
+
+RESEMBLE_COMPAT_PACKAGES = [
+    "numpy==1.26.2",
+    "scipy==1.11.4",
+    "pandas==2.1.3",
+    "matplotlib==3.8.1",
+    "tabulate==0.8.10",
+    "resampy==0.4.2",
+]
+
+RESEMBLE_COMPAT_VERSIONS = {
+    "numpy": "1.26.2",
+    "scipy": "1.11.4",
+    "pandas": "2.1.3",
+    "matplotlib": "3.8.1",
+    "tabulate": "0.8.10",
+    "resampy": "0.4.2",
+}
+
+
+def verify_audio_cleaning_dependencies(resemble_enabled: bool) -> None:
+    modules = {
+        "boto3": "boto3",
+        "librosa": "librosa",
+        "soundfile": "soundfile",
+        "whisper": "openai-whisper",
+        "demucs": "demucs",
+        "onnxruntime": "onnxruntime-gpu",
+        "deepspeed": "deepspeed",
+        "scipy": "scipy",
+        "tqdm": "tqdm",
+        "numpy": "numpy",
+        "pandas": "pandas",
+        "matplotlib": "matplotlib",
+        "tabulate": "tabulate",
+        "resampy": "resampy",
+    }
+    if resemble_enabled:
+        modules["resemble_enhance"] = "resemble-enhance"
+    require_python_modules(modules, RESEMBLE_COMPAT_VERSIONS)
 
 
 def install_dependencies(style_dir: Path) -> None:
@@ -469,8 +549,9 @@ def install_dependencies(style_dir: Path) -> None:
     if missing_sys:
         print(f"[INFO] Instalando pacotes de sistema: {missing_sys}")
         # No Kaggle, apt-get precisa de cuidado, mas geralmente funciona
-        run(["apt-get", "update"], check=False)
-        run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"], check=False)
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"])
+    require_commands(["ffmpeg", "sox", "espeak-ng"])
 
     print("[INFO] Verificando/Instalando dependências Python...")
     # Desinstalar onnxruntime comum para evitar conflito com a versão GPU
@@ -502,22 +583,21 @@ def install_dependencies(style_dir: Path) -> None:
         "ptflops",
         "celluloid",
         "rich",
-        "matplotlib",
         "deepspeed",
-        "pandas",
-        "scipy",
         "tqdm",
+        *RESEMBLE_COMPAT_PACKAGES,
     ])
 
     if os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0":
-        # Dependências do Resemble já foram instaladas acima; --no-deps preserva o stack torch/torchaudio do Kaggle.
+        # --no-deps preserva o stack torch/torchaudio do Kaggle; os pins críticos do Resemble entram acima.
         run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "--no-deps", "resemble-enhance"])
     else:
         print("[INFO] Pulando resemble-enhance no Kaggle porque SUPER_VOZ_ENABLE_RESEMBLE=0.")
 
     requirements = style_dir / "requirements.txt"
     if requirements.exists():
-        run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)], check=False)
+        run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)])
+    verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
 
 
 def install_audio_cleaning_dependencies() -> None:
@@ -532,8 +612,9 @@ def install_audio_cleaning_dependencies() -> None:
 
     if missing_sys:
         print(f"[INFO] Instalando pacotes de sistema: {missing_sys}")
-        run(["apt-get", "update"], check=False)
-        run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"], check=False)
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"])
+    require_commands(["ffmpeg", "sox", "espeak-ng"])
 
     print("[INFO] Verificando/Instalando dependências Python da limpeza...")
     os.environ["DS_BUILD_OPS"] = "0"
@@ -550,14 +631,16 @@ def install_audio_cleaning_dependencies() -> None:
         "demucs",
         "onnxruntime-gpu",
         "deepspeed",
-        "scipy",
         "tqdm",
+        *RESEMBLE_COMPAT_PACKAGES,
     ])
 
     if os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0":
+        # --no-deps preserva o stack torch/torchaudio do Kaggle; os pins críticos do Resemble entram acima.
         run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "--no-deps", "resemble-enhance"])
     else:
         print("[INFO] Pulando resemble-enhance no Kaggle porque SUPER_VOZ_ENABLE_RESEMBLE=0.")
+    verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
 
 
 def get_r2_client(cfg: dict):
@@ -1139,6 +1222,14 @@ def install_f5_tts_dependencies() -> None:
         "num2words",
     ]
     run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", *packages])
+    require_python_modules(
+        {
+            "f5_tts": "f5-tts",
+            "accelerate": "accelerate",
+            "safetensors": "safetensors",
+            "num2words": "num2words",
+        }
+    )
     install_ml_runtime_dependencies()
 
 

@@ -7,6 +7,8 @@
 import os
 import subprocess
 import argparse
+import importlib.metadata
+import inspect
 import json
 import shutil
 from pathlib import Path
@@ -64,7 +66,7 @@ def check_gpu_enhancer():
         else:
             print("[OK] Motor GPU (ONNX) confirmado.")
     except Exception as e:
-        print(f"[AVISO] Falha ao verificar motor GPU: {e}")
+        raise RuntimeError(f"Falha obrigatoria ao verificar/instalar onnxruntime-gpu: {e}") from e
 
 
 def is_cuda_runtime_error(exc: Exception) -> bool:
@@ -149,7 +151,7 @@ class DNSMOS:
                 providers = ['CPUExecutionProvider']
             self.session = ort.InferenceSession(self.model_path, providers=providers)
         except Exception as e:
-            print(f"[ERRO CRÍTICO] Motor DNSMOS falhou: {e}")
+            raise RuntimeError(f"Motor DNSMOS/onnxruntime obrigatorio falhou: {e}") from e
 
     def score(self, audio: np.ndarray, sr: int) -> dict:
         if self.session is None: return {"ovrl": 0.4, "sig": 0.4, "bak": 0.4} 
@@ -186,8 +188,33 @@ class AudioEnhancer:
             import resemble_enhance
             self.has_resemble = True
             print(f"[INFO] Motor de restauração V9 detectado no device: {self.device_str}")
+            self._log_resemble_runtime()
         except Exception as e:
-            print(f"[AVISO] resemble-enhance indisponível: {e}")
+            raise RuntimeError(f"resemble-enhance obrigatorio indisponivel: {e}") from e
+
+    def _package_version(self, package_name: str) -> str:
+        try:
+            return importlib.metadata.version(package_name)
+        except Exception:
+            return "indisponivel"
+
+    def _log_resemble_runtime(self):
+        try:
+            from resemble_enhance.enhancer.inference import enhance
+            signature = str(inspect.signature(enhance))
+        except Exception as exc:
+            signature = f"indisponivel: {exc}"
+
+        print(
+            "[RESEMBLE][VERSOES] "
+            f"resemble-enhance={self._package_version('resemble-enhance')} | "
+            f"numpy={np.__version__} | scipy={self._package_version('scipy')} | "
+            f"torch={torch.__version__} | torchaudio={self._package_version('torchaudio')}"
+        )
+        print(f"[RESEMBLE][API] enhance{signature}")
+        if int(np.__version__.split(".", 1)[0]) >= 2:
+            print("[RESEMBLE][ERRO] NumPy 2.x e incompativel com o CFM enhance do resemble-enhance.")
+            print("[RESEMBLE][ERRO] Instale numpy==1.26.2 e scipy==1.11.4 antes da limpeza.")
 
     def _warmup(self):
         """Carrega o modelo no device alvo sem rodar dummy inference fora do fluxo oficial."""
@@ -245,7 +272,10 @@ class AudioEnhancer:
                         print(f"  [AVISO] Falha CUDA em {input_path.name}. Usando Fallback CPU...")
                         hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, treatment, "cpu")
                     elif treatment == "enhance":
-                        print(f"  [AVISO] Enhance falhou em {input_path.name}; tentando denoise conservador...")
+                        print(
+                            f"  [AVISO] Enhance falhou em {input_path.name}: {first_err}; "
+                            "tentando denoise conservador..."
+                        )
                         hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, "denoise", self.device_str)
                     else:
                         raise first_err

@@ -45,6 +45,8 @@ antes de:
 [INFO] Iniciando Limpeza IA
 ```
 
+Atualizacao: dependencia essencial ausente nao deve mais virar aviso e continuar. O runner valida modulos e pins apos instalar; se `onnxruntime`, `whisper`, `resemble_enhance`, NumPy/SciPy compativeis ou outra biblioteca usada nao estiverem presentes, o processo aborta antes do dataset.
+
 ### P100 incompatível com PyTorch ativo
 
 Falha observada ao carregar Whisper:
@@ -79,7 +81,20 @@ Falha observada durante restauração de áudio:
 [ERRO ENHANCER] No module named 'deepspeed'
 ```
 
-Isso nao quebra Whisper nem a padronizacao final; o script preserva o original e segue. A causa e que `resemble-enhance` e instalado com `--no-deps` para nao trocar Torch/Torchaudio, entao o runner precisa instalar explicitamente dependencias usadas internamente. O instalador da Limpeza IA agora inclui `deepspeed` e define `DS_BUILD_OPS=0`.
+Antes isso nao quebrava Whisper nem a padronizacao final; o script preservava o original e seguia. Essa tolerancia foi removida para dependencia essencial. A causa e que `resemble-enhance` e instalado com `--no-deps` para nao trocar Torch/Torchaudio, entao o runner precisa instalar explicitamente dependencias usadas internamente. O instalador da Limpeza IA agora inclui `deepspeed`, define `DS_BUILD_OPS=0` e aborta se o modulo nao ficar disponivel.
+
+### Resemble `enhance` falhando mas `denoise` funcionando
+
+Falha observada:
+
+```text
+[RESEMBLE] Defeito principal: degraded_voice | Tratamento unico: enhance
+[AVISO] Enhance falhou ... tentando denoise conservador...
+```
+
+A causa raiz provavel nao e o audio isolado. O `enhance` passa pelo CFM interno do Resemble, que chama `float(scipy.optimize.fsolve(...))`. Com NumPy 2.x, essa conversao de array 1D para escalar falha com `only 0-dimensional arrays can be converted to Python scalars`. O `denoise` funciona porque nao passa por esse CFM.
+
+O runner instala `resemble-enhance --no-deps` para preservar Torch/Torchaudio, entao agora instala manualmente os pins criticos do wheel antes da limpeza: `numpy==1.26.2`, `scipy==1.11.4`, `pandas==2.1.3`, `matplotlib==3.8.1`, `tabulate==0.8.10` e `resampy==0.4.2`. No log da limpeza, conferir `[RESEMBLE][VERSOES]`; se aparecer `numpy=2...`, o ambiente ainda esta errado para `enhance`.
 
 ### Checkpoint F5 sem envelope EMA
 

@@ -1,5 +1,13 @@
 # Registro de Alterações: limpeza_ia.py
 
+## [2026-06-08] Falha obrigatoria em dependencia essencial
+- Politica nova: biblioteca usada pelo fluxo ativo nao pode falhar silenciosamente nem virar fallback permanente.
+- `scripts/run_kaggle_styletts2.py` agora aborta quando falha a instalacao de pacotes Python essenciais, pacotes de sistema de audio (`ffmpeg`, `sox`, `espeak-ng`) ou quando a verificacao pos-instalacao nao encontra os modulos esperados.
+- A verificacao pos-instalacao cobre limpeza/transcricao (`librosa`, `soundfile`, `openai-whisper`, `onnxruntime-gpu`, `demucs`, `deepspeed`, `tqdm`), pins criticos do Resemble (`numpy==1.26.2`, `scipy==1.11.4`, `pandas==2.1.3`, `matplotlib==3.8.1`, `tabulate==0.8.10`, `resampy==0.4.2`) e `resemble-enhance` quando habilitado.
+- `limpeza_ia.py` tambem deixa de tratar ausencia de `onnxruntime`/DNSMOS ou `resemble_enhance` habilitado como aviso: agora levanta erro fatal antes de gerar dataset possivelmente incorreto.
+- Fallbacks ainda permitidos: falha de runtime CUDA cai para CPU quando o pacote existe, e falha de inferencia em um arquivo pode preservar o original apos validacao. Isso nao cobre modulo ausente nem versao incompatível.
+- Componentes opcionais de persistencia, como TeraBox e tentativas alternativas de restore/upload Hugging Face, continuam tolerantes porque nao sao bibliotecas obrigatorias para limpar, transcrever ou treinar.
+
 ## [2026-06-08] Normalizacao da saida do Resemble antes do WAV
 - Sintoma no Kaggle: o Resemble chegava a iniciar `enhance`, mas falhava com `[ERRO ENHANCER] only 0-dimensional arrays can be converted to Python scalars`.
 - Diagnostico: a falha e compativel com retorno do enhancer em formato nao escalar/nao 1D na borda de gravacao, ou `sample_rate` vindo como array/tensor em vez de `int` Python.
@@ -8,6 +16,15 @@
 - Quando `enhance` falha por erro interno nao-CUDA, o script tenta `denoise` conservador antes de desistir do reparo.
 - Para diagnostico com stack trace curto, rode com `SUPER_VOZ_DEBUG_ENHANCER=1`.
 - Se o enhancer ainda retornar audio vazio, escalar ou sample rate invalido, a validacao falha de forma controlada e o pipeline preserva o original antes da padronizacao final.
+
+## [2026-06-08] Causa raiz da falha repetida do `enhance`
+- Sintoma novo: o log deixou de mostrar `[ERRO ENHANCER]`, mas ainda mostrava `Enhance falhou ... tentando denoise conservador...` em varios arquivos `degraded_voice`.
+- Diagnostico confirmado por inspecao do wheel oficial: `enhance` passa pelo CFM em `resemble_enhance/enhancer/lcfm/cfm.py`; ali a biblioteca chama `float(scipy.optimize.fsolve(...))`.
+- Com NumPy 2.x, `float(np.array([valor]))` falha com `only 0-dimensional arrays can be converted to Python scalars`. Com NumPy 1.26.x, isso ainda funciona.
+- O proprio wheel `resemble-enhance` declara `numpy==1.26.2` e `scipy==1.11.4`, mas o runner instalava `resemble-enhance --no-deps` para preservar Torch/Torchaudio e nao pinava esses dois pacotes.
+- `scripts/run_kaggle_styletts2.py` agora instala os pins criticos do Resemble antes do `resemble-enhance --no-deps`: `numpy==1.26.2`, `scipy==1.11.4`, `pandas==2.1.3`, `matplotlib==3.8.1`, `tabulate==0.8.10` e `resampy==0.4.2`.
+- `limpeza_ia.py` agora imprime no inicio as versoes de `resemble-enhance`, NumPy, SciPy, Torch e Torchaudio, alem da assinatura real de `enhance`. Se detectar NumPy 2.x, registra erro explicito de incompatibilidade.
+- O fallback para `denoise` continua apenas como guarda de continuidade por arquivo, nao como estrategia principal para descartar `enhance`.
 
 ## [2026-06-08] Dependencias da limpeza no modo Kaggle F5-TTS PT-BR
 - Diagnostico: no modo `tts_engine: "f5_tts_ptbr"`, o runner pulava o instalador legado `install_dependencies(style_dir)`, mas ainda chamava `limpeza_ia.py`.
@@ -25,7 +42,7 @@
 
 ## [2026-06-08] Dependencia `deepspeed` para Resemble no fluxo F5
 - Sintoma: `Falha ao carregar Resemble na GPU: No module named 'deepspeed'`.
-- A limpeza continuava funcional porque preservava o original, padronizava o audio e transcrevia com Whisper.
+- Antes, a limpeza continuava porque preservava o original, padronizava o audio e transcrevia com Whisper. Essa tolerancia foi removida para dependencias essenciais.
 - A causa era `resemble-enhance --no-deps`; isso preserva Torch/Torchaudio, mas exige que dependencias internas sejam instaladas explicitamente.
 - `install_audio_cleaning_dependencies()` agora inclui `deepspeed` e define `DS_BUILD_OPS=0` para evitar compilacao pesada de ops no Kaggle.
 
