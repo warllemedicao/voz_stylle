@@ -173,6 +173,25 @@ Correcao aplicada:
 - `SUPER_VOZ_ML_RUNTIME_REEXECED=1` evita loop de reinicio;
 - apos o reinicio, a limpeza e o treino carregam `torch`, `torchaudio` e `torchvision` das versoes instaladas no disco.
 
+## Correcao do falso erro NumPy/SciPy apos instalar limpeza
+
+Erro observado apos instalar dependencias da limpeza:
+
+```text
+whisper: numpy.dtype size changed
+scipy: cannot import name 'broadcast_to' from 'numpy.lib.stride_tricks'
+pandas: numpy.dtype size changed
+```
+
+Causa: o runner instalava/downgradeava `numpy`, `scipy`, `pandas`, `matplotlib` e dependencias do Resemble no mesmo processo Python e validava imports imediatamente. Como o processo podia ter bibliotecas cientificas antigas carregadas, surgia erro ABI mesmo depois do `pip install` terminar.
+
+Correcao aplicada:
+
+- a verificacao das dependencias da limpeza agora roda em subprocesso Python limpo;
+- se a verificacao passar, o runner reinicia a si mesmo uma vez;
+- `SUPER_VOZ_AUDIO_DEPS_REEXECED=1` evita loop e faz o fluxo pular reinstalacao da limpeza na volta;
+- `huggingface_hub` foi fixado em `>=0.23.2,<1.0` para nao conflitar com `transformers==4.46.3`.
+
 ## Correcao do erro de checkpoint F5 sem `ema_model_state_dict`
 
 Erro observado depois da limpeza e da preparacao do dataset F5:

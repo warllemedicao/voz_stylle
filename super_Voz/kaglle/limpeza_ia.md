@@ -8,6 +8,13 @@
 - Fallbacks ainda permitidos: falha de runtime CUDA cai para CPU quando o pacote existe, e falha de inferencia em um arquivo pode preservar o original apos validacao. Isso nao cobre modulo ausente nem versao incompatível.
 - Componentes opcionais de persistencia, como TeraBox e tentativas alternativas de restore/upload Hugging Face, continuam tolerantes porque nao sao bibliotecas obrigatorias para limpar, transcrever ou treinar.
 
+## [2026-06-08] Reinicio apos instalar dependencias cientificas
+- Sintoma no Kaggle: apos instalar os pins de limpeza/Resemble, imports de `whisper`, `scipy`, `pandas`, `matplotlib` ou `resampy` falhavam com `numpy.dtype size changed` ou `cannot import name 'broadcast_to'`.
+- Causa: o runner trocava NumPy/SciPy/Pandas no mesmo processo Python e validava imports imediatamente; o processo podia manter partes da versao anterior em memoria/cache.
+- A verificacao das dependencias de limpeza agora roda em subprocesso limpo e, se passar, o runner reinicia uma vez com `SUPER_VOZ_AUDIO_DEPS_REEXECED=1`.
+- Ao voltar do reinicio, o instalador da limpeza pula reinstalacao e apenas valida os modulos no processo novo.
+- `huggingface_hub` tambem foi fixado em `>=0.23.2,<1.0` para nao quebrar `transformers==4.46.3`.
+
 ## [2026-06-08] Normalizacao da saida do Resemble antes do WAV
 - Sintoma no Kaggle: o Resemble chegava a iniciar `enhance`, mas falhava com `[ERRO ENHANCER] only 0-dimensional arrays can be converted to Python scalars`.
 - Diagnostico: a falha e compativel com retorno do enhancer em formato nao escalar/nao 1D na borda de gravacao, ou `sample_rate` vindo como array/tensor em vez de `int` Python.

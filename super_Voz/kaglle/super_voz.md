@@ -138,6 +138,8 @@ Isso evita aplicar uma cadeia ampla de efeitos em todos os arquivos. O objetivo 
 - A politica atual e falhar cedo quando dependencia essencial falha: runtime ML, F5-TTS, limpeza/transcricao, DNSMOS/ONNX, Resemble e comandos de audio sao verificados apos instalacao. TeraBox e restores/uploads alternativos continuam opcionais.
 - Em P100/K80, `torch.cuda.is_available()` pode ser verdadeiro mesmo quando o PyTorch instalado nao tem kernel para a arquitetura da GPU. A limpeza agora faz um teste CUDA real antes de carregar Whisper/Resemble; se aparecer `no kernel image is available`, usa CPU nessa etapa em vez de encerrar o pipeline.
 - Quando o runner troca o stack `torch/torchaudio/torchvision` para compatibilidade P100, ele valida em subprocesso limpo e reinicia a si mesmo uma vez. Isso evita falso erro de ABI causado por `torch` antigo ja importado no processo que chamou `pip install`.
+- Quando o runner instala/downgradeia NumPy/SciPy/Pandas para compatibilidade Resemble, tambem valida em subprocesso limpo e reinicia uma vez. Isso evita falsos erros `numpy.dtype size changed` em `whisper`, `pandas`, `scipy` e `resampy`.
+- `huggingface_hub` fica fixado em `>=0.23.2,<1.0` para manter compatibilidade com `transformers==4.46.3`.
 
 ### 4. Preparação StyleTTS2
 - `prepare_styletts2_dataset.py` converte `Audios_processados` para listas do StyleTTS2.

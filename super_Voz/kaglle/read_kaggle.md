@@ -80,6 +80,20 @@ No log corrigido deve aparecer:
 Runtime ML atualizado; reiniciando o runner para recarregar Torch/Torchaudio/Torchvision.
 ```
 
+Se depois da instalacao da limpeza aparecer:
+
+```text
+whisper ... numpy.dtype size changed
+scipy ... cannot import name 'broadcast_to' from 'numpy.lib.stride_tricks'
+pandas ... numpy.dtype size changed
+```
+
+a causa e parecida: o runner instalava/downgradeava `numpy`, `scipy`, `pandas`, `matplotlib` e dependencias do Resemble no mesmo processo Python e validava imports logo em seguida. O processo ainda podia manter partes do NumPy anterior em memoria/cache, gerando erro ABI.
+
+Correcao: a verificacao das dependencias da limpeza agora roda em subprocesso Python limpo. Se passar, o runner reinicia a si mesmo uma vez com `SUPER_VOZ_AUDIO_DEPS_REEXECED=1`; ao voltar, pula a reinstalacao da limpeza e apenas valida os modulos no ambiente recarregado.
+
+Tambem foi fixado `huggingface_hub>=0.23.2,<1.0`, porque `huggingface_hub 1.x` conflita com `transformers==4.46.3`.
+
 e depois, dentro da limpeza, uma destas linhas:
 
 ```text

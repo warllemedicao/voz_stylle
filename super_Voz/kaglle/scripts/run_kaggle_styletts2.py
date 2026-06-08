@@ -15,6 +15,14 @@ import zipfile
 from pathlib import Path
 
 AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
+HF_HUB_COMPAT_PACKAGE = "huggingface_hub>=0.23.2,<1.0"
+ML_RUNTIME_MODULES = {
+    "torch": "torch",
+    "torchaudio": "torchaudio",
+    "torchvision": "torchvision",
+    "transformers": "transformers",
+    "accelerate": "accelerate",
+}
 
 
 def run(cmd, cwd=None, check=True, display_cmd=None):
@@ -102,6 +110,14 @@ def reexec_after_ml_runtime_install() -> None:
         return
     os.environ["SUPER_VOZ_ML_RUNTIME_REEXECED"] = "1"
     print("[INFO] Runtime ML atualizado; reiniciando o runner para recarregar Torch/Torchaudio/Torchvision.")
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def reexec_after_audio_cleaning_install() -> None:
+    if os.environ.get("SUPER_VOZ_AUDIO_DEPS_REEXECED", "0") == "1":
+        return
+    os.environ["SUPER_VOZ_AUDIO_DEPS_REEXECED"] = "1"
+    print("[INFO] Dependencias da limpeza atualizadas; reiniciando o runner para recarregar NumPy/SciPy/Pandas.")
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
@@ -522,6 +538,11 @@ def transformer_packages_for_runtime() -> list[str]:
 
 def install_ml_runtime_dependencies() -> None:
     print("\n--- Instalando Runtime ML compatível ---")
+    if os.environ.get("SUPER_VOZ_ML_RUNTIME_REEXECED", "0") == "1":
+        print("[INFO] Runtime ML ja foi atualizado nesta execucao; validando em processo limpo.")
+        require_python_modules_in_fresh_process(ML_RUNTIME_MODULES)
+        return
+
     torch_packages = torch_packages_for_runtime()
     transformer_packages = transformer_packages_for_runtime()
     run([
@@ -533,17 +554,10 @@ def install_ml_runtime_dependencies() -> None:
         "--upgrade",
         *torch_packages,
         *transformer_packages,
+        HF_HUB_COMPAT_PACKAGE,
         "accelerate",
     ])
-    require_python_modules_in_fresh_process(
-        {
-            "torch": "torch",
-            "torchaudio": "torchaudio",
-            "torchvision": "torchvision",
-            "transformers": "transformers",
-            "accelerate": "accelerate",
-        }
-    )
+    require_python_modules_in_fresh_process(ML_RUNTIME_MODULES)
     reexec_after_ml_runtime_install()
 
 
@@ -585,11 +599,15 @@ def verify_audio_cleaning_dependencies(resemble_enabled: bool) -> None:
     }
     if resemble_enabled:
         modules["resemble_enhance"] = "resemble-enhance"
-    require_python_modules(modules, RESEMBLE_COMPAT_VERSIONS)
+    require_python_modules_in_fresh_process(modules, RESEMBLE_COMPAT_VERSIONS)
 
 
 def install_dependencies(style_dir: Path) -> None:
     print("\n--- Instalando Dependências ---")
+    if os.environ.get("SUPER_VOZ_AUDIO_DEPS_REEXECED", "0") == "1":
+        print("[INFO] Dependencias de audio/limpeza ja foram atualizadas nesta execucao; validando.")
+        verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
+        return
     
     # No Kaggle, tentamos instalar boto3 se não houver
     run([sys.executable, "-m", "pip", "install", "-q", "boto3"])
@@ -624,7 +642,7 @@ def install_dependencies(style_dir: Path) -> None:
         *torch_packages,
         *transformer_packages,
         "accelerate",
-        "huggingface_hub",
+        HF_HUB_COMPAT_PACKAGE,
         "pyyaml",
         "librosa",
         "soundfile",
@@ -651,10 +669,15 @@ def install_dependencies(style_dir: Path) -> None:
     if requirements.exists():
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)])
     verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
+    reexec_after_audio_cleaning_install()
 
 
 def install_audio_cleaning_dependencies() -> None:
     print("\n--- Instalando Dependências da Limpeza IA ---")
+    if os.environ.get("SUPER_VOZ_AUDIO_DEPS_REEXECED", "0") == "1":
+        print("[INFO] Dependencias da limpeza ja foram atualizadas nesta execucao; validando.")
+        verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
+        return
 
     run([sys.executable, "-m", "pip", "install", "-q", "boto3"])
 
@@ -694,6 +717,7 @@ def install_audio_cleaning_dependencies() -> None:
     else:
         print("[INFO] Pulando resemble-enhance no Kaggle porque SUPER_VOZ_ENABLE_RESEMBLE=0.")
     verify_audio_cleaning_dependencies(os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0")
+    reexec_after_audio_cleaning_install()
 
 
 def get_r2_client(cfg: dict):
@@ -1024,7 +1048,7 @@ def setup_huggingface(cfg: dict) -> dict | None:
         print("[HuggingFace][AVISO] " + message)
         return None
 
-    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "huggingface_hub"])
+    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", HF_HUB_COMPAT_PACKAGE])
     if shutil.which("hf") is None:
         message = "O comando hf nao ficou disponivel; sincronizacao desativada."
         if hf_cfg.get("required", False):
@@ -1247,7 +1271,7 @@ def ensure_f5_tts_ptbr_library(cfg: dict, hf_cfg: dict | None) -> Path | None:
         raise RuntimeError("f5_tts_ptbr.repo_id nao configurado e biblioteca nao foi restaurada do Hugging Face.")
 
     print(f"[F5-TTS-PT-BR] Baixando biblioteca/base de {repo_id} para {local_dir}")
-    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "huggingface_hub"])
+    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", HF_HUB_COMPAT_PACKAGE])
     from huggingface_hub import snapshot_download
 
     local_dir.mkdir(parents=True, exist_ok=True)
