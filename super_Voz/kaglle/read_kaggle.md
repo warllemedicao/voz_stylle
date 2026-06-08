@@ -108,6 +108,26 @@ No proximo log, procurar:
 [F5-TTS-PT-BR] Checkpoint pretrain compatível criado
 ```
 
+### Checkpoint F5 com embedding de texto incompatível
+
+Falha observada depois da conversao EMA:
+
+```text
+RuntimeError: Error(s) in loading state_dict for EMA:
+size mismatch for ema_model.transformer.text_embed.text_embed.weight:
+copying a param with shape torch.Size([2546, 512]) from checkpoint,
+the shape in current model is torch.Size([56, 512])
+```
+
+A causa e que o checkpoint PT-BR original pode ter um vocabulario maior que o tokenizer `char` criado para o dataset atual. O runner agora le `vocab.txt` depois de `prepare_csv_wavs.py`, calcula `len(vocab) + 1` linhas e ajusta `ema_model.transformer.text_embed.text_embed.weight` durante a conversao do pretrain. O convertido passa a usar o nome `pretrained_*_ema_vocab<N>.pt`, o que evita reutilizar caches antigos com embedding incompatível.
+
+No proximo log, procurar:
+
+```text
+[F5-TTS-PT-BR] Embedding de texto do pretrain ajustado ao vocabulario atual: 2546 -> 56 linhas.
+[F5-TTS-PT-BR] Checkpoint pretrain compatível criado
+```
+
 ### Caminho do `limpeza_ia.py`
 
 O Kaggle falhou com:

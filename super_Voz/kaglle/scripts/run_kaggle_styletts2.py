@@ -1164,6 +1164,53 @@ def normalize_f5_ema_state_dict(state_dict: dict) -> dict:
     return normalized
 
 
+def f5_dataset_vocab_rows(dataset_dir: Path) -> int | None:
+    vocab_path = dataset_dir / "vocab.txt"
+    if not vocab_path.exists():
+        print(f"[F5-TTS-PT-BR][AVISO] vocab.txt nao encontrado em {dataset_dir}; checkpoint pretrain nao sera ajustado ao vocabulario.")
+        return None
+
+    tokens = [line for line in vocab_path.read_text(encoding="utf-8").splitlines() if line]
+    if not tokens:
+        print(f"[F5-TTS-PT-BR][AVISO] vocab.txt vazio em {vocab_path}; checkpoint pretrain nao sera ajustado ao vocabulario.")
+        return None
+    return len(tokens) + 1
+
+
+def adapt_f5_text_embedding_to_vocab(state_dict: dict, target_rows: int | None) -> tuple[dict, bool]:
+    import torch
+
+    if not target_rows:
+        return state_dict, False
+
+    key = "ema_model.transformer.text_embed.text_embed.weight"
+    weight = state_dict.get(key)
+    if weight is None or not hasattr(weight, "shape") or len(weight.shape) != 2:
+        print(f"[F5-TTS-PT-BR][AVISO] Embedding de texto nao encontrado no checkpoint; chave esperada: {key}")
+        return state_dict, False
+
+    current_rows = int(weight.shape[0])
+    if current_rows == target_rows:
+        return state_dict, False
+
+    adapted = dict(state_dict)
+    if current_rows > target_rows:
+        adapted[key] = weight[:target_rows].clone()
+        print(
+            "[F5-TTS-PT-BR] Embedding de texto do pretrain ajustado ao vocabulario atual: "
+            f"{current_rows} -> {target_rows} linhas."
+        )
+        return adapted, True
+
+    extra_rows = weight.new_zeros((target_rows - current_rows, int(weight.shape[1])))
+    adapted[key] = torch.cat([weight, extra_rows], dim=0)
+    print(
+        "[F5-TTS-PT-BR] Embedding de texto do pretrain expandido ao vocabulario atual: "
+        f"{current_rows} -> {target_rows} linhas."
+    )
+    return adapted, True
+
+
 def save_f5_trainer_checkpoint(checkpoint: dict, destination: Path) -> None:
     import torch
 
@@ -1173,9 +1220,16 @@ def save_f5_trainer_checkpoint(checkpoint: dict, destination: Path) -> None:
         torch.save(checkpoint, destination)
 
 
-def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -> Path:
+def build_f5_trainer_checkpoint(state_dict: dict, target_vocab_rows: int | None) -> tuple[dict, bool]:
+    normalized = normalize_f5_ema_state_dict(state_dict)
+    normalized, changed = adapt_f5_text_embedding_to_vocab(normalized, target_vocab_rows)
+    return {"ema_model_state_dict": normalized}, changed
+
+
+def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path, target_vocab_rows: int | None = None) -> Path:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    converted = checkpoint_dir / f"pretrained_{base_checkpoint.stem}_ema.pt"
+    vocab_suffix = f"_vocab{target_vocab_rows}" if target_vocab_rows else ""
+    converted = checkpoint_dir / f"pretrained_{base_checkpoint.stem}_ema{vocab_suffix}.pt"
     for stale in checkpoint_dir.glob("pretrained_*"):
         if stale.resolve() == converted.resolve():
             continue
@@ -1196,7 +1250,7 @@ def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -
         import torch
 
         raw_state = load_file(str(base_checkpoint), device="cpu")
-        checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(raw_state)}
+        checkpoint, _ = build_f5_trainer_checkpoint(raw_state, target_vocab_rows)
         save_f5_trainer_checkpoint(checkpoint, converted)
         print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
         return converted
@@ -1206,10 +1260,15 @@ def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -
 
         loaded = torch.load(base_checkpoint, weights_only=True, map_location="cpu")
         if isinstance(loaded, dict) and "ema_model_state_dict" in loaded:
-            print(f"[F5-TTS-PT-BR] Checkpoint pretrain já está em formato trainer: {base_checkpoint}")
-            return base_checkpoint
+            checkpoint, changed = build_f5_trainer_checkpoint(loaded["ema_model_state_dict"], target_vocab_rows)
+            if not changed:
+                print(f"[F5-TTS-PT-BR] Checkpoint pretrain já está em formato trainer: {base_checkpoint}")
+                return base_checkpoint
+            save_f5_trainer_checkpoint(checkpoint, converted)
+            print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
+            return converted
         if isinstance(loaded, dict):
-            checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(loaded)}
+            checkpoint, _ = build_f5_trainer_checkpoint(loaded, target_vocab_rows)
             save_f5_trainer_checkpoint(checkpoint, converted)
             print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
             return converted
@@ -1543,7 +1602,8 @@ def run_f5_tts_training(
     checkpoint_dir = f5_package_path(f"../../ckpts/{dataset_name}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     base_checkpoint = f5_checkpoint_path(f5_library_dir, f5_cfg)
-    train_pretrain_checkpoint = ensure_f5_pretrain_checkpoint(base_checkpoint, checkpoint_dir)
+    target_vocab_rows = f5_dataset_vocab_rows(f5_dataset_dir)
+    train_pretrain_checkpoint = ensure_f5_pretrain_checkpoint(base_checkpoint, checkpoint_dir, target_vocab_rows)
     finetune_script = f5_package_path("train/finetune_cli.py")
     train_cmd = [
         "accelerate",
