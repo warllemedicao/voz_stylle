@@ -5,6 +5,9 @@ from pathlib import Path
 
 
 REQUIRED_FILES = [
+    "manifest.json",
+    "config.json",
+    "tokenizer_config.json",
     "model/best_model.pth",
     "model/config.yml",
     "data_reference/referencia_voz.wav",
@@ -24,6 +27,9 @@ def validate_package(package_dir: str | Path) -> dict[str, Path]:
         "package_dir": root,
         "checkpoint": root / "model" / "best_model.pth",
         "config": root / "model" / "config.yml",
+        "manifest": root / "manifest.json",
+        "package_config": root / "config.json",
+        "tokenizer_config": root / "tokenizer_config.json",
         "reference_audio": root / "data_reference" / "referencia_voz.wav",
     }
 

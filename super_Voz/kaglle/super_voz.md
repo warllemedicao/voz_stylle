@@ -191,7 +191,8 @@ hf://buckets/warllem/Super_voz
 - O runner informa o uso e espaço livre do `/kaggle/working` nos pontos principais do pipeline.
 - Quando `best_model.pth` é restaurado, o checkpoint base LibriTTS não é baixado novamente.
 - No primeiro treinamento, o checkpoint base LibriTTS é removido depois que o primeiro checkpoint da voz é enviado.
-- O pacote inclui configuração, dataset preparado, metadata, referência de voz, documentação, requisitos e pesos auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando disponíveis.
+- O pacote inclui `manifest.json`, `config.json`, `tokenizer_config.json`, `api_config.json`, `README.md`, configuração StyleTTS2, dataset preparado, metadata, referência de voz, documentação, requisitos e pesos auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando disponíveis.
+- Os metadados seguem uma organização parecida com pacotes do Hugging Face, mas o checkpoint continua em formato StyleTTS2 `.pth` e nao e um modelo nativo de `transformers.pipeline`.
 - Os WAVs preparados também são necessários para retomar o treinamento, pois `train_list.txt` e `val_list.txt` apontam para esses arquivos.
 - O StyleTTS2 não usa um vocoder externo separado; o decoder/vocoder treinado está dentro do checkpoint.
 - O projeto oficial fornece notebooks de inferência, não um `inference.py` oficial. Os notebooks `Inference_LibriTTS.ipynb` e `Inference_LJSpeech.ipynb` são incluídos quando disponíveis.

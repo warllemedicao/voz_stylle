@@ -205,9 +205,12 @@ Fallback manual para repositorio:
 hf upload-large-folder warllem/Super_voz ./data --repo-type model
 ```
 
-O pacote inclui `best_model.pth`, `config.yml`, listas e audios do dataset, metadata,
-referencia de voz, requisitos, notebooks oficiais de inferencia, documentacao e os pesos
-auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando estiverem disponiveis.
+O pacote inclui `manifest.json`, `config.json`, `tokenizer_config.json`, `api_config.json`,
+`README.md`, `best_model.pth`, `config.yml`, listas e audios do dataset, metadata, referencia
+de voz, requisitos, notebooks oficiais de inferencia, documentacao e os pesos auxiliares
+`Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando estiverem disponiveis. Esses JSONs documentam
+o pacote no estilo Hugging Face, mas o modelo continua sendo StyleTTS2 e nao carrega diretamente
+via `transformers.pipeline`.
 
 ## TeraBox opcional
 

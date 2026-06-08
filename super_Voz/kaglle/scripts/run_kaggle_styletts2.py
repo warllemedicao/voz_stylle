@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import re
 import shutil
@@ -999,6 +1000,154 @@ def hardlink_tree(src: Path, dst: Path) -> bool:
     return True
 
 
+def write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_voice_package_metadata(
+    package_dir: Path,
+    cfg: dict,
+    latest: Path | None,
+    sample_candidates: list[Path],
+    missing_aux: list[str],
+) -> None:
+    language = "pt-BR"
+    phonemizer_language = str(cfg.get("phonemizer_language", "pt-br"))
+    sample_rate = int(cfg.get("sample_rate", 24000))
+    model_name = "super_Voz StyleTTS2 pt-BR"
+    latest_name = latest.name if latest else None
+    has_best = (package_dir / "model" / "best_model.pth").exists()
+
+    manifest = {
+        "schema_version": 1,
+        "package_name": "super_Voz",
+        "model_name": model_name,
+        "architecture": "StyleTTS2",
+        "primary_language": language,
+        "supported_languages": [language],
+        "sample_rate": sample_rate,
+        "inference": {
+            "checkpoint": "model/best_model.pth",
+            "config": "model/config.yml",
+            "reference_audio": "data_reference/referencia_voz.wav",
+            "requirements": "inference/requirements.txt",
+        },
+        "training_resume": {
+            "enabled": True,
+            "latest_checkpoint": "model/latest_checkpoint.pth",
+            "source_checkpoint": latest_name,
+        },
+        "tokenizer": {
+            "phonemize": bool(cfg.get("phonemize", True)),
+            "phonemizer_language": phonemizer_language,
+            "config": "tokenizer/phonemizer_config.txt",
+        },
+        "auxiliary_models": {
+            "ASR": "model/Utils/ASR",
+            "JDC": "model/Utils/JDC",
+            "PLBERT": "model/Utils/PLBERT",
+        },
+        "status": {
+            "has_best_model": has_best,
+            "has_latest_checkpoint": latest is not None,
+            "missing_auxiliary": missing_aux,
+            "has_generated_sample": bool(sample_candidates),
+        },
+    }
+    write_json(package_dir / "manifest.json", manifest)
+
+    write_json(
+        package_dir / "config.json",
+        {
+            "architectures": ["StyleTTS2"],
+            "model_type": "styletts2",
+            "name_or_path": "super_Voz",
+            "language": language,
+            "languages": [language],
+            "sample_rate": sample_rate,
+            "checkpoint_format": "pytorch_pth",
+            "checkpoint": "model/best_model.pth",
+            "styletts2_config": "model/config.yml",
+            "reference_audio": "data_reference/referencia_voz.wav",
+            "phonemizer_language": phonemizer_language,
+            "transformers_compatible": False,
+            "notes": "Metadados para empacotamento; este pacote nao carrega diretamente via transformers.pipeline.",
+        },
+    )
+
+    write_json(
+        package_dir / "tokenizer_config.json",
+        {
+            "tokenizer_class": "StyleTTS2Phonemizer",
+            "language": language,
+            "phonemizer_language": phonemizer_language,
+            "phonemize": bool(cfg.get("phonemize", True)),
+            "backend": "phonemizer",
+            "plbert_path": "model/Utils/PLBERT",
+            "transformers_tokenizer": False,
+        },
+    )
+
+    write_json(
+        package_dir / "api_config.json",
+        {
+            "api_version": 1,
+            "default_language": language,
+            "input_field": "text",
+            "output_format": "wav",
+            "sample_rate": sample_rate,
+            "checkpoint": "model/best_model.pth",
+            "config": "model/config.yml",
+            "reference_audio": "data_reference/referencia_voz.wav",
+        },
+    )
+
+    readme = f"""# super_Voz StyleTTS2 pt-BR
+
+Pacote de voz treinado com StyleTTS2 para portugues do Brasil.
+
+## Inferencia
+
+Use `model/best_model.pth` com `model/config.yml` e mantenha os auxiliares em `model/Utils/`.
+O audio de referencia fica em `data_reference/referencia_voz.wav`.
+
+Este pacote nao e um modelo Transformers nativo. Os arquivos `config.json` e
+`tokenizer_config.json` existem para documentar o pacote no Hugging Face e facilitar validacao.
+
+## Retomada de treino
+
+`model/latest_checkpoint.pth` e `model/latest_checkpoint.txt` sao usados para retomada. Para
+comecar um treino do zero, remova checkpoints antigos antes de executar o Kaggle.
+
+## Idioma
+
+- Idioma principal: `pt-BR`
+- Phonemizer: `{phonemizer_language}`
+"""
+    (package_dir / "README.md").write_text(readme, encoding="utf-8")
+
+    usage = """# Uso de inferencia
+
+Arquivos essenciais:
+
+- `model/best_model.pth`
+- `model/config.yml`
+- `model/Utils/ASR`
+- `model/Utils/JDC`
+- `model/Utils/PLBERT`
+- `data_reference/referencia_voz.wav`
+- `tokenizer/phonemizer_config.txt`
+
+Use os notebooks oficiais do StyleTTS2 incluidos em `inference/` quando estiverem presentes.
+O pacote foi marcado como portugues do Brasil (`pt-BR`).
+"""
+    (package_dir / "docs" / "uso_inferencia.md").write_text(usage, encoding="utf-8")
+
+
 def read_validation_losses(style_dir: Path) -> dict[int, float]:
     log_path = style_dir / "Models" / "super_Voz" / "train.log"
     if not log_path.exists():
@@ -1146,6 +1295,7 @@ def materialize_voice_package(
     sample_candidates = sorted(Path(cfg.get("output_dir", "/kaggle/working/super_Voz_outputs")).rglob("*.wav"))
     if sample_candidates:
         copy_if_exists(sample_candidates[0], outputs_dir / "amostras_geradas.wav")
+    write_voice_package_metadata(package_dir, cfg, latest, sample_candidates, missing_aux)
 
     report = dataset_dir / "prepare_report.txt"
     params = [
