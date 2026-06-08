@@ -42,6 +42,49 @@ A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime
 
 Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
 
+## Investigacao de modelo F5 com vocabulario/tokenizer publicado
+
+Em 08/06/2026 foi investigado se existe um modelo F5-TTS PT-BR que publique o vocabulario/tokenizer original junto com o checkpoint. Isso importa porque o checkpoint `firstpixel/F5-TTS-pt-br` tem embedding de texto com 2546 linhas, mas a biblioteca importada para `libraries/f5_tts_ptbr` nao inclui `vocab.txt`, `tokenizer.json` ou configuracao equivalente. Sem esse arquivo, existe a tabela treinada, mas nao existe o mapa confiavel que diz qual token de texto corresponde a cada linha da tabela.
+
+Conclusao pratica:
+
+- Nao e seguro forcar o checkpoint `firstpixel/F5-TTS-pt-br` a usar 2546 tokens se o vocabulario original nao estiver disponivel.
+- A correcao atual com tokenizer `char` continua sendo o caminho seguro para destravar o treino: o runner ajusta apenas a camada textual para o vocabulario real do dataset atual e preserva o restante do modelo PT-BR.
+- Para buscar mais naturalidade e preservar melhor a camada textual original, o melhor candidato encontrado para teste futuro foi `Tharyck/multispeaker-ptbr-f5tts`.
+
+Modelo candidato:
+
+```text
+Tharyck/multispeaker-ptbr-f5tts
+https://huggingface.co/Tharyck/multispeaker-ptbr-f5tts
+```
+
+Motivos:
+
+- e F5-TTS com foco em portugues brasileiro;
+- publica `vocab.txt`;
+- publica `setting.json`;
+- publica checkpoints `.pt` e `.safetensors`;
+- o model card declara treino multilocutor em PT-BR com cerca de `390.78h` e `159,348 samples`;
+- o `setting.json` mostra `tokenizer_type: "char"`, o que combina melhor com o fluxo atual do runner do que um tokenizer desconhecido.
+
+Fontes verificadas:
+
+- Arquivos do modelo Tharyck: `https://huggingface.co/Tharyck/multispeaker-ptbr-f5tts/tree/main`
+- `setting.json`: `https://huggingface.co/Tharyck/multispeaker-ptbr-f5tts/blob/main/setting.json`
+- `vocab.txt`: `https://huggingface.co/Tharyck/multispeaker-ptbr-f5tts/blob/main/vocab.txt`
+- Modelo oficial SWivid com `vocab.txt`: `https://huggingface.co/SWivid/F5-TTS/tree/main/F5TTS_v1_Base`
+- Discussao do `firstpixel/F5-TTS-pt-br` sobre falta/duvida de `vocab.txt`: `https://huggingface.co/firstpixel/F5-TTS-pt-br/discussions/15`
+
+Impacto esperado se o runner for adaptado futuramente para esse candidato:
+
+- maior chance de preservar a camada textual treinada;
+- potencial melhora de pronuncia e naturalidade;
+- download maior, porque o repositorio Tharyck contem checkpoints grandes;
+- necessidade de ajustar `f5_tts_ptbr.repo_id`, `checkpoint_subpath` e a preparacao do dataset para copiar/usar o `vocab.txt` do modelo base em vez de gerar apenas o vocabulario pequeno do dataset atual.
+
+Recomendacao atual: manter a correcao ja aplicada para `firstpixel/F5-TTS-pt-br` e usar `Tharyck/multispeaker-ptbr-f5tts` como proximo experimento controlado, comparando audios gerados antes de trocar definitivamente o modelo base do pipeline.
+
 ## Correcao do erro de dependencias da Limpeza IA no modo F5
 
 Erro observado:
