@@ -7,6 +7,13 @@
 - `scripts/run_kaggle_styletts2.py` agora possui `install_audio_cleaning_dependencies()` e chama esse bloco tambem no ramo `f5_tts_ptbr` antes de iniciar a Limpeza IA.
 - Para diagnosticos futuros, conferir se o log mostra `--- Instalando Dependências da Limpeza IA ---` antes de `[INFO] Iniciando Limpeza IA`.
 
+## [2026-06-08] Fallback Torch/Whisper para P100 incompatível
+- Sintoma no Kaggle P100: Whisper falhava em `whisper.load_model("medium")` com `CUDA error: no kernel image is available for execution on the device`.
+- A causa era PyTorch ativo sem kernel compativel com `sm_60`; `torch.cuda.is_available()` ainda retornava verdadeiro, entao Whisper tentava carregar na GPU e abortava.
+- `limpeza_ia.py` agora roda um teste CUDA real com tensor pequeno antes de escolher o device de Whisper/Resemble.
+- Se o teste ou o carregamento do Whisper falhar por erro CUDA de runtime, a limpeza recarrega Whisper em CPU e chama `transcribe(..., fp16=False)`.
+- O `AudioEnhancer` recebe o mesmo device seguro. Se Resemble falhar em CUDA por erro de runtime, tenta fallback CPU para aquele arquivo.
+
 ## [2026-06-05] Observacao do runner Kaggle
 - A limpeza de audio continua independente da retencao de checkpoints, mas o fluxo Kaggle foi ajustado para evitar falso sucesso de treino.
 - O runner mantem o checkpoint mais recente em `Models/super_Voz` apos upload e remove apenas checkpoints anteriores quando um checkpoint mais novo ja foi persistido.

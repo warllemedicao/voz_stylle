@@ -135,6 +135,7 @@ Isso evita aplicar uma cadeia ampla de efeitos em todos os arquivos. O objetivo 
   - normalização.
 - Transcreve com Whisper e gera `train.txt`.
 - No Kaggle com `tts_engine: "f5_tts_ptbr"`, essa etapa tambem exige instalacao propria das dependencias da limpeza. O runner agora chama `install_audio_cleaning_dependencies()` antes de `limpeza_ia.py`; se o log mostrar `No module named 'onnxruntime'`, `No module named 'resemble_enhance'` ou `No module named 'whisper'`, verificar primeiro se esse bloco de instalacao apareceu antes de `[INFO] Iniciando Limpeza IA`.
+- Em P100/K80, `torch.cuda.is_available()` pode ser verdadeiro mesmo quando o PyTorch instalado nao tem kernel para a arquitetura da GPU. A limpeza agora faz um teste CUDA real antes de carregar Whisper/Resemble; se aparecer `no kernel image is available`, usa CPU nessa etapa em vez de encerrar o pipeline.
 
 ### 4. Preparação StyleTTS2
 - `prepare_styletts2_dataset.py` converte `Audios_processados` para listas do StyleTTS2.

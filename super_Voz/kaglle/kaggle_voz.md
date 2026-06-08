@@ -67,6 +67,31 @@ Correcao aplicada:
 - O instalador cobre `openai-whisper`, `onnxruntime-gpu`, `librosa`, `soundfile`, `demucs`, `scipy`, `tqdm` e `resemble-enhance` quando `enable_resemble_enhance: true`.
 - Para diagnosticos futuros: se o erro citar modulo ausente dentro de `limpeza_ia.py`, verificar primeiro se o fluxo ativo e `f5_tts_ptbr` e se `install_audio_cleaning_dependencies()` apareceu no log antes de `[INFO] Iniciando Limpeza IA`.
 
+## Correcao preventiva para GPU P100 no modo F5
+
+Aviso observado no Kaggle:
+
+```text
+Tesla P100-PCIE-16GB with CUDA capability sm_60 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_70 sm_75 sm_80 sm_86 sm_90 sm_100 sm_120.
+RuntimeError: CUDA error: no kernel image is available for execution on the device
+```
+
+Diagnostico:
+
+- O runner detectava a P100 e continuava porque `torch.cuda.is_available()` ainda retornava verdadeiro.
+- Esse aviso nao e apenas cosmetico: quando algum modelo tentar executar kernel CUDA, a execucao pode falhar por incompatibilidade de arquitetura.
+- A regra que fixa `torch==2.5.1`, `torchaudio==2.5.1`, `torchvision==0.20.1` e `transformers==4.46.3` ja existia, mas ficava dentro do instalador legado do StyleTTS2.
+- Como o modo ativo e `tts_engine: "f5_tts_ptbr"`, esse instalador legado era pulado.
+
+Correcao aplicada:
+
+- `scripts/run_kaggle_styletts2.py` agora tem `install_ml_runtime_dependencies()`.
+- No fluxo F5, o runner chama esse bloco antes da limpeza e reforca a chamada depois de instalar `f5-tts`.
+- Em GPU `sm_<7`, esse bloco reaproveita a regra existente para fixar Torch/Transformers compativeis com P100/K80.
+- `limpeza_ia.py` tambem testa uma operacao CUDA real antes de escolher GPU para Whisper/Resemble. Se a GPU falhar com `cudaErrorNoKernelImageForDevice`, Whisper e Resemble caem para CPU em vez de abortar o pipeline.
+- Para diagnosticos futuros: se o log mostrar P100 com `sm_60 is not compatible`, conferir se aparece `--- Instalando Runtime ML compatível ---` e a mensagem `GPU sm_60 detectada; fixando Torch 2.5.1` antes da limpeza/treino. Dentro da limpeza, conferir se aparece `[OK] Torch CUDA operacional` ou o fallback `Whisper/Resemble usarao CPU`.
+
 ## Correcao do erro `Could not resolve host: github.com`
 
 O erro atual foi:

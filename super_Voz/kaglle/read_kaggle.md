@@ -45,6 +45,31 @@ antes de:
 [INFO] Iniciando Limpeza IA
 ```
 
+### P100 incompatível com PyTorch ativo
+
+Falha observada ao carregar Whisper:
+
+```text
+Tesla P100-PCIE-16GB with CUDA capability sm_60 is not compatible with the current PyTorch installation.
+RuntimeError: CUDA error: no kernel image is available for execution on the device
+```
+
+A causa e PyTorch instalado sem kernel CUDA para `sm_60`. O runner agora executa `install_ml_runtime_dependencies()` no fluxo F5 antes da limpeza e depois de instalar `f5-tts`, fixando Torch/Transformers para P100/K80. A limpeza tambem testa CUDA de verdade antes de carregar Whisper; se falhar, usa CPU para Whisper/Resemble em vez de abortar.
+
+No proximo log, conferir:
+
+```text
+--- Instalando Runtime ML compatível ---
+GPU sm_60 detectada; fixando Torch 2.5.1
+```
+
+e depois, dentro da limpeza, uma destas linhas:
+
+```text
+[OK] Torch CUDA operacional
+Whisper/Resemble usarao CPU
+```
+
 ### Caminho do `limpeza_ia.py`
 
 O Kaggle falhou com:

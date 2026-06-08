@@ -65,6 +65,62 @@ def check_gpu_enhancer():
     except Exception as e:
         print(f"[AVISO] Falha ao verificar motor GPU: {e}")
 
+
+def is_cuda_runtime_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = [
+        "no kernel image is available",
+        "cudaerrornokernelimagefordevice",
+        "not compatible with the current pytorch installation",
+        "expected all tensors to be on the same device",
+        "cuda error",
+    ]
+    return any(marker in text for marker in markers)
+
+
+def select_torch_device() -> str:
+    if os.environ.get("SUPER_VOZ_FORCE_CPU", "0") == "1":
+        print("[INFO] SUPER_VOZ_FORCE_CPU=1; Whisper/Resemble usarao CPU.")
+        return "cpu"
+
+    if not torch.cuda.is_available():
+        print("[INFO] Torch CUDA indisponivel; Whisper/Resemble usarao CPU.")
+        return "cpu"
+
+    try:
+        name = torch.cuda.get_device_name(0)
+        major, minor = torch.cuda.get_device_capability(0)
+        probe = torch.ones(1, device="cuda")
+        probe = (probe + 1).detach().cpu()
+        torch.cuda.synchronize()
+        print(f"[OK] Torch CUDA operacional para {name} (sm_{major}{minor}).")
+        return "cuda"
+    except Exception as exc:
+        print(f"[AVISO] Torch CUDA falhou em teste real: {exc}")
+        print("[INFO] Whisper/Resemble usarao CPU para evitar falha cudaErrorNoKernelImageForDevice.")
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return "cpu"
+
+
+def load_whisper_safely(model_name: str, device: str):
+    import whisper
+
+    try:
+        return whisper.load_model(model_name, device=device), device
+    except Exception as exc:
+        if device == "cuda" and is_cuda_runtime_error(exc):
+            print(f"[AVISO] Whisper falhou na GPU: {exc}")
+            print("[INFO] Recarregando Whisper em CPU.")
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            return whisper.load_model(model_name, device="cpu"), "cpu"
+        raise
+
 # ============================================================
 # DNSMOS: NOTA DE QUALIDADE (MÉTRICA DA MICROSOFT)
 # ============================================================
@@ -117,9 +173,9 @@ class DNSMOS:
 # ============================================================
 
 class AudioEnhancer:
-    def __init__(self, enabled: bool = True):
-        self.device_obj = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    def __init__(self, enabled: bool = True, device_str: str | None = None):
+        self.device_str = device_str or select_torch_device()
+        self.device_obj = torch.device(self.device_str)
         self.has_resemble = False
         self._warmup_done = False
         if not enabled:
@@ -184,8 +240,8 @@ class AudioEnhancer:
                 try:
                     hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, treatment, self.device_str)
                 except Exception as gpu_err:
-                    if "device" in str(gpu_err).lower() and self.device_str == "cuda":
-                        print(f"  [AVISO] GPU Mismatch detectado em {input_path.name}. Usando Fallback CPU...")
+                    if self.device_str == "cuda" and is_cuda_runtime_error(gpu_err):
+                        print(f"  [AVISO] Falha CUDA em {input_path.name}. Usando Fallback CPU...")
                         hwav, new_sr = self._run_resemble(denoise, enhance, dwav, sr, treatment, "cpu")
                     else:
                         raise gpu_err
@@ -322,6 +378,7 @@ def main():
     print(f"[INFO] Ambiente detectado: {args.ambiente}")
     if args.ambiente in ["colab", "kaggle"]:
         check_gpu_enhancer()
+    torch_device = select_torch_device()
 
     analyzer = AudioAnalyzer()
     enhancer_enabled = args.enhancer == "resemble"
@@ -330,11 +387,10 @@ def main():
         if args.ambiente in ["colab", "kaggle"] and not enhancer_enabled:
             print("[INFO] Resemble Enhance em modo auto foi desativado neste ambiente.")
             print("[INFO] Motivo: SUPER_VOZ_ENABLE_RESEMBLE=0.")
-    enhancer = AudioEnhancer(enabled=enhancer_enabled)
+    enhancer = AudioEnhancer(enabled=enhancer_enabled, device_str=torch_device)
     
     print("[INFO] Carregando Whisper...")
-    import whisper
-    model = whisper.load_model("medium")
+    model, whisper_device = load_whisper_safely("medium", torch_device)
 
     audio_files = sorted(list(input_dir.glob("*.wav")) + list(input_dir.glob("*.mp3")))
     print(f"\n🚀 Processando {len(audio_files)} arquivos...")
@@ -361,7 +417,7 @@ def main():
             sf.write(str(final_wav), y, 24000, subtype='PCM_16')
             
             print(f"  [WHISPER] Transcrevendo...")
-            res = model.transcribe(str(final_wav), language="pt")
+            res = model.transcribe(str(final_wav), language="pt", fp16=(whisper_device == "cuda"))
             text = res["text"].strip()
             print(f"  [TEXTO] {text}")
             if text: metadata.append(f"{file_id}|{text}|{text}")

@@ -438,6 +438,23 @@ def transformer_packages_for_runtime() -> list[str]:
     return ["transformers"]
 
 
+def install_ml_runtime_dependencies() -> None:
+    print("\n--- Instalando Runtime ML compatível ---")
+    torch_packages = torch_packages_for_runtime()
+    transformer_packages = transformer_packages_for_runtime()
+    run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "--upgrade",
+        *torch_packages,
+        *transformer_packages,
+        "accelerate",
+    ])
+
+
 def install_dependencies(style_dir: Path) -> None:
     print("\n--- Instalando Dependências ---")
     
@@ -1042,6 +1059,7 @@ def install_f5_tts_dependencies() -> None:
         "num2words",
     ]
     run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", *packages])
+    install_ml_runtime_dependencies()
 
 
 def read_voice_metadata_rows(processed_dir: Path) -> list[tuple[str, str]]:
@@ -2419,6 +2437,7 @@ def main() -> int:
     f5_library_dir = None
 
     if tts_engine == "f5_tts_ptbr":
+        install_ml_runtime_dependencies()
         style_dir.mkdir(parents=True, exist_ok=True)
         f5_library_dir = ensure_f5_tts_ptbr_library(cfg, huggingface_cfg)
         if f5_library_dir:
