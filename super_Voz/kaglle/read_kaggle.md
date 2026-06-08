@@ -238,6 +238,8 @@ O runner tenta restaurar automaticamente de caminhos como:
 
 No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base LibriTTS em ingles. Ele restaura/baixa a biblioteca `libraries/f5_tts_ptbr`, faz o fine-tuning F5-TTS PT-BR e exporta a voz para `voices/minha_voz_f5_tts_ptbr`. A inferencia deve acontecer em outro programa que carregue esses artefatos.
 
+O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, envia para Hugging Face apenas quando encontra checkpoint novo e estavel, e pula uploads quando nada mudou. O log tambem recebe mensagens de keep-alive durante o `accelerate` para manter a execucao visivel no Kaggle.
+
 Durante o treino, o runner nao apaga mais o checkpoint que acabou de enviar. Ele mantem o checkpoint
 mais recente em `Models/super_Voz` e remove apenas checkpoints anteriores quando um checkpoint mais
 novo ja foi enviado com sucesso. Isso evita que o config aponte para um arquivo removido no meio da

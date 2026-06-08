@@ -1132,11 +1132,144 @@ def latest_f5_checkpoint(checkpoint_dir: Path) -> Path | None:
     candidates = [
         path
         for path in checkpoint_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".pt", ".pth", ".safetensors"}
+        if path.is_file()
+        and path.suffix.lower() in {".pt", ".pth", ".safetensors"}
+        and not path.name.startswith("pretrained_")
     ]
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.stat().st_mtime_ns)
+
+
+def is_stable_file(path: Path, min_age_seconds: int = 30) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    if time.time() - path.stat().st_mtime < min_age_seconds:
+        return False
+    first = path.stat()
+    time.sleep(1)
+    if not path.exists():
+        return False
+    second = path.stat()
+    return first.st_size == second.st_size and first.st_mtime_ns == second.st_mtime_ns
+
+
+def f5_checkpoint_state(path: Path | None) -> tuple[str, int, int] | None:
+    if not path or not path.exists():
+        return None
+    stat = path.stat()
+    return (path.name, stat.st_size, stat.st_mtime_ns)
+
+
+def sync_f5_voice_checkpoint(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    f5_cfg: dict,
+    f5_library_dir: Path,
+    f5_dataset_dir: Path,
+    processed_dir: Path,
+    base_checkpoint: Path,
+    checkpoint: Path,
+    reason: str,
+) -> bool:
+    materialize_f5_voice_package(
+        package_dir,
+        f5_cfg,
+        f5_library_dir,
+        f5_dataset_dir,
+        processed_dir,
+        base_checkpoint,
+        checkpoint,
+    )
+    print(f"[F5-TTS-PT-BR] Sincronizando checkpoint ({reason}): {checkpoint.name}")
+    return upload_huggingface_subdir(hf_cfg, package_dir, f"voices/{package_dir.name}")
+
+
+def start_f5_checkpoint_sync(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    f5_cfg: dict,
+    f5_library_dir: Path,
+    f5_dataset_dir: Path,
+    processed_dir: Path,
+    base_checkpoint: Path,
+    checkpoint_dir: Path,
+    poll_interval_seconds: int,
+    stable_seconds: int,
+) -> tuple[threading.Event, threading.Thread] | tuple[None, None]:
+    if not hf_cfg:
+        return None, None
+
+    stop_event = threading.Event()
+
+    def worker() -> None:
+        last_uploaded = f5_cfg.get("_last_uploaded_checkpoint")
+        while not stop_event.wait(poll_interval_seconds):
+            try:
+                latest = latest_f5_checkpoint(checkpoint_dir)
+                current_state = f5_checkpoint_state(latest)
+                if not latest or not current_state or current_state == last_uploaded:
+                    continue
+                if not is_stable_file(latest, min_age_seconds=stable_seconds):
+                    continue
+                if sync_f5_voice_checkpoint(
+                    hf_cfg,
+                    package_dir,
+                    f5_cfg,
+                    f5_library_dir,
+                    f5_dataset_dir,
+                    processed_dir,
+                    base_checkpoint,
+                    latest,
+                    reason="checkpoint novo durante treino",
+                ):
+                    last_uploaded = current_state
+                    f5_cfg["_last_uploaded_checkpoint"] = current_state
+            except Exception as exc:
+                print(f"[F5-TTS-PT-BR][AVISO] Falha no monitor de checkpoint: {exc}")
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    print(
+        "[F5-TTS-PT-BR] Monitor de checkpoints ativo; "
+        f"checagem a cada {poll_interval_seconds}s e upload somente para checkpoint novo estavel."
+    )
+    return stop_event, thread
+
+
+def run_with_keepalive(cmd, cwd=None, keepalive_interval_seconds: int = 120) -> None:
+    print("\n$ " + " ".join(map(str, cmd)))
+    if cwd:
+        print("cwd:", cwd)
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+
+    stop_event = threading.Event()
+
+    def keepalive() -> None:
+        while not stop_event.wait(keepalive_interval_seconds):
+            print("[KAGGLE][KEEPALIVE] Treino em andamento; aguardando novo log/checkpoint.", flush=True)
+
+    thread = threading.Thread(target=keepalive, daemon=True)
+    thread.start()
+    try:
+        for line in process.stdout:
+            print(line.rstrip(), flush=True)
+    finally:
+        stop_event.set()
+        thread.join(timeout=5)
+
+    returncode = process.wait()
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd)
 
 
 def materialize_f5_voice_package(
@@ -1232,6 +1365,8 @@ def run_f5_tts_training(
     run(prepare_cmd)
 
     base_checkpoint = f5_checkpoint_path(f5_library_dir, f5_cfg)
+    checkpoint_dir = f5_package_path(f"../../ckpts/{dataset_name}")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     finetune_script = f5_package_path("train/finetune_cli.py")
     train_cmd = [
         "accelerate",
@@ -1268,15 +1403,53 @@ def run_f5_tts_training(
         "--tokenizer",
         tokenizer,
     ]
-    run(train_cmd)
 
-    checkpoint_dir = find_f5_checkpoint_dir(dataset_name)
+    sync_stop = None
+    sync_thread = None
+    training_error: Exception | None = None
+    try:
+        sync_stop, sync_thread = start_f5_checkpoint_sync(
+            hf_cfg,
+            package_dir,
+            f5_cfg,
+            f5_library_dir,
+            f5_dataset_dir,
+            processed_dir,
+            base_checkpoint,
+            checkpoint_dir,
+            max(30, int(f5_cfg.get("checkpoint_sync_interval_seconds", 300))),
+            max(5, int(f5_cfg.get("checkpoint_stable_seconds", 30))),
+        )
+        run_with_keepalive(
+            train_cmd,
+            keepalive_interval_seconds=max(30, int(f5_cfg.get("keepalive_interval_seconds", 120))),
+        )
+    except Exception as exc:
+        training_error = exc
+        print(f"[F5-TTS-PT-BR][AVISO] Treino interrompido/falhou; tentando sincronizar ultimo checkpoint antes de sair: {exc}")
+    finally:
+        if sync_stop and sync_thread:
+            sync_stop.set()
+            sync_thread.join(timeout=30)
+
+    checkpoint_dir = find_f5_checkpoint_dir(dataset_name) or checkpoint_dir
     trained_checkpoint = latest_f5_checkpoint(checkpoint_dir) if checkpoint_dir else None
     if not trained_checkpoint:
+        if training_error:
+            raise training_error
         raise RuntimeError("Treino F5-TTS terminou, mas nenhum checkpoint da voz foi encontrado.")
     print(f"[F5-TTS-PT-BR] Ultimo checkpoint da voz: {trained_checkpoint}")
 
-    materialize_f5_voice_package(
+    if not is_stable_file(
+        trained_checkpoint,
+        min_age_seconds=max(5, int(f5_cfg.get("checkpoint_stable_seconds", 30))),
+    ):
+        print("[F5-TTS-PT-BR][AVISO] Ultimo checkpoint ainda nao parece estavel; tentando sincronizar mesmo assim no encerramento.")
+    final_state = f5_checkpoint_state(trained_checkpoint)
+    if final_state == f5_cfg.get("_last_uploaded_checkpoint"):
+        print("[F5-TTS-PT-BR] Ultimo checkpoint ja sincronizado; upload final duplicado pulado.")
+    elif sync_f5_voice_checkpoint(
+        hf_cfg,
         package_dir,
         f5_cfg,
         f5_library_dir,
@@ -1284,9 +1457,12 @@ def run_f5_tts_training(
         processed_dir,
         base_checkpoint,
         trained_checkpoint,
-    )
-    upload_huggingface_subdir(hf_cfg, package_dir, f"voices/{package_dir.name}")
+        reason="sincronizacao final",
+    ):
+        f5_cfg["_last_uploaded_checkpoint"] = final_state
     print(f"[F5-TTS-PT-BR] Pacote da voz neural pronto em: {package_dir}")
+    if training_error:
+        raise training_error
     return package_dir
 
 

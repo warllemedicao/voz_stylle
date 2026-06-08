@@ -40,6 +40,8 @@ A configuracao atual usa `tts_engine: "f5_tts_ptbr"`. Nesse modo, o runner:
 
 A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote da voz em `voices/minha_voz_f5_tts_ptbr`.
 
+Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
+
 ## Correcao do erro `Could not resolve host: github.com`
 
 O erro atual foi:

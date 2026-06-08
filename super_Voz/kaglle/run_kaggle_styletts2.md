@@ -63,6 +63,9 @@ f5_tts_ptbr:
   checkpoint_subpath: "pt-br/model_last.safetensors"
   exp_name: "F5TTS_Base"
   tokenizer: "char"
+  checkpoint_sync_interval_seconds: 300
+  checkpoint_stable_seconds: 30
+  keepalive_interval_seconds: 120
 ```
 
 Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr` do Hugging Face. Se a pasta ainda nao existir, baixa `firstpixel/F5-TTS-pt-br` e envia a biblioteca para essa pasta remota. Os checkpoints/artefatos da voz F5 devem ficar separados no pacote `minha_voz_f5_tts_ptbr`, enquanto o pacote legado `minha_voz_styletts2` continua reservado para StyleTTS2.
@@ -70,6 +73,10 @@ Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr` do Huggin
 Enquanto `tts_engine: "f5_tts_ptbr"` estiver ativo, o fallback LibriTTS em ingles fica bloqueado quando nao houver checkpoint anterior. Isso evita iniciar uma nova voz PT-BR a partir de `yl4579/StyleTTS2-LibriTTS`.
 
 Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote `voices/minha_voz_f5_tts_ptbr`.
+
+Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, o pacote parcial da voz e materializado e enviado para `voices/minha_voz_f5_tts_ptbr`. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
+
+Se o processo de treino falhar depois de algum checkpoint local existir, o runner ainda tenta sincronizar o ultimo checkpoint antes de encerrar. Se o monitor ja tiver enviado exatamente esse checkpoint, o upload final duplicado e pulado.
 
 ## Entrada de audios
 

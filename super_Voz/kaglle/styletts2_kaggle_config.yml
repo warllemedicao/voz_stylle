@@ -59,6 +59,9 @@ f5_tts_ptbr:
   last_per_updates: 100
   keep_last_n_checkpoints: 3
   mixed_precision: "fp16"
+  checkpoint_sync_interval_seconds: 300
+  checkpoint_stable_seconds: 30
+  keepalive_interval_seconds: 120
 
 # Persistencia opcional via TeraBox.
 # Recomendado: use Kaggle Secrets. Para o modo padrao abaixo, crie:
