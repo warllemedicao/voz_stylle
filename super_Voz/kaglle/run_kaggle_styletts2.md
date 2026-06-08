@@ -73,6 +73,8 @@ Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr` do Huggin
 
 Enquanto `tts_engine: "f5_tts_ptbr"` estiver ativo, o fallback LibriTTS em ingles fica bloqueado quando nao houver checkpoint anterior. Isso evita iniciar uma nova voz PT-BR a partir de `yl4579/StyleTTS2-LibriTTS`.
 
+Mesmo no modo F5, a etapa `limpeza_ia.py` continua obrigatoria antes do dataset. Por isso o runner instala dependencias de limpeza em um bloco proprio (`install_audio_cleaning_dependencies()`), separado do instalador legado do StyleTTS2. Esse bloco deve aparecer no log antes de `[INFO] Iniciando Limpeza IA` e cobre `openai-whisper`, `onnxruntime-gpu`, `resemble-enhance` quando habilitado, e bibliotecas de audio como `librosa` e `soundfile`.
+
 Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote `voices/minha_voz_f5_tts_ptbr`.
 
 Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, o pacote parcial da voz e materializado e enviado para `voices/minha_voz_f5_tts_ptbr`. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.

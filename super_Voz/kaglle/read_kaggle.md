@@ -20,6 +20,33 @@ super_Voz/kaglle/scripts/run_kaggle_styletts2.py
 
 ## Erro corrigido
 
+### Dependencias da Limpeza IA no modo F5
+
+Falha observada depois do download R2:
+
+```text
+[AVISO] Falha ao verificar motor GPU: No module named 'onnxruntime'
+[ERRO CRÍTICO] Motor DNSMOS falhou: No module named 'onnxruntime'
+[AVISO] resemble-enhance indisponível: No module named 'resemble_enhance'
+ModuleNotFoundError: No module named 'whisper'
+```
+
+A causa nao era R2 nem falta de audio. O modo atual `tts_engine: "f5_tts_ptbr"` pulava o instalador legado do StyleTTS2, mas ainda executava `limpeza_ia.py`, que precisa de `openai-whisper`, `onnxruntime-gpu` e, quando ativado, `resemble-enhance`.
+
+O runner agora instala as dependencias da limpeza via `install_audio_cleaning_dependencies()` tambem no ramo F5 antes de iniciar a Limpeza IA. Para o proximo erro parecido, confirme no log se aparece:
+
+```text
+--- Instalando Dependências da Limpeza IA ---
+```
+
+antes de:
+
+```text
+[INFO] Iniciando Limpeza IA
+```
+
+### Caminho do `limpeza_ia.py`
+
 O Kaggle falhou com:
 
 ```text

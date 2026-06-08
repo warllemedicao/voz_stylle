@@ -42,6 +42,31 @@ A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime
 
 Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
 
+## Correcao do erro de dependencias da Limpeza IA no modo F5
+
+Erro observado:
+
+```text
+[AVISO] Falha ao verificar motor GPU: No module named 'onnxruntime'
+[ERRO CRÍTICO] Motor DNSMOS falhou: No module named 'onnxruntime'
+[AVISO] resemble-enhance indisponível: No module named 'resemble_enhance'
+ModuleNotFoundError: No module named 'whisper'
+```
+
+Diagnostico:
+
+- O download dos audios do R2 tinha funcionado; `Audios brutos importados do R2: 523` confirma a entrada.
+- A falha acontecia depois, quando o runner chamava `limpeza_ia.py`.
+- Com `tts_engine: "f5_tts_ptbr"`, o runner pulava o bloco legado `install_dependencies(style_dir)`, que instalava `openai-whisper`, `onnxruntime-gpu` e `resemble-enhance`.
+- Mesmo no modo F5, a limpeza/transcricao ainda depende desses pacotes antes de preparar o dataset.
+
+Correcao aplicada:
+
+- `scripts/run_kaggle_styletts2.py` agora tem `install_audio_cleaning_dependencies()`.
+- No ramo `f5_tts_ptbr`, o runner chama esse instalador antes de baixar/processar os audios com `limpeza_ia.py`.
+- O instalador cobre `openai-whisper`, `onnxruntime-gpu`, `librosa`, `soundfile`, `demucs`, `scipy`, `tqdm` e `resemble-enhance` quando `enable_resemble_enhance: true`.
+- Para diagnosticos futuros: se o erro citar modulo ausente dentro de `limpeza_ia.py`, verificar primeiro se o fluxo ativo e `f5_tts_ptbr` e se `install_audio_cleaning_dependencies()` apareceu no log antes de `[INFO] Iniciando Limpeza IA`.
+
 ## Correcao do erro `Could not resolve host: github.com`
 
 O erro atual foi:

@@ -503,6 +503,44 @@ def install_dependencies(style_dir: Path) -> None:
         run([sys.executable, "-m", "pip", "install", "-q", "-r", str(requirements)], check=False)
 
 
+def install_audio_cleaning_dependencies() -> None:
+    print("\n--- Instalando Dependências da Limpeza IA ---")
+
+    run([sys.executable, "-m", "pip", "install", "-q", "boto3"])
+
+    missing_sys = []
+    for pkg in ["ffmpeg", "sox", "espeak-ng"]:
+        if shutil.which(pkg) is None:
+            missing_sys.append(pkg)
+
+    if missing_sys:
+        print(f"[INFO] Instalando pacotes de sistema: {missing_sys}")
+        run(["apt-get", "update"], check=False)
+        run(["apt-get", "install", "-y", "ffmpeg", "sox", "libsndfile1", "espeak-ng"], check=False)
+
+    print("[INFO] Verificando/Instalando dependências Python da limpeza...")
+    run([sys.executable, "-m", "pip", "uninstall", "-y", "onnxruntime", "onnxruntime-gpu"], check=False)
+    run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "librosa",
+        "soundfile",
+        "openai-whisper",
+        "demucs",
+        "onnxruntime-gpu",
+        "scipy",
+        "tqdm",
+    ])
+
+    if os.environ.get("SUPER_VOZ_ENABLE_RESEMBLE", "1") != "0":
+        run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "--no-deps", "resemble-enhance"])
+    else:
+        print("[INFO] Pulando resemble-enhance no Kaggle porque SUPER_VOZ_ENABLE_RESEMBLE=0.")
+
+
 def get_r2_client(cfg: dict):
     import boto3
     from botocore.config import Config
@@ -2385,6 +2423,7 @@ def main() -> int:
         f5_library_dir = ensure_f5_tts_ptbr_library(cfg, huggingface_cfg)
         if f5_library_dir:
             print(f"[F5-TTS-PT-BR] Biblioteca separada pronta para treino/inferencia: {f5_library_dir}")
+        install_audio_cleaning_dependencies()
     else:
         clone_or_pull(cfg.get("styletts2_repo", "https://github.com/yl4579/StyleTTS2.git"), style_dir)
         package_dir = style_dir / str(cfg.get("voice_package_dir", "minha_voz_styletts2"))

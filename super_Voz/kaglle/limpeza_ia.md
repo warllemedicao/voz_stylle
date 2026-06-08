@@ -1,5 +1,12 @@
 # Registro de Alterações: limpeza_ia.py
 
+## [2026-06-08] Dependencias da limpeza no modo Kaggle F5-TTS PT-BR
+- Diagnostico: no modo `tts_engine: "f5_tts_ptbr"`, o runner pulava o instalador legado `install_dependencies(style_dir)`, mas ainda chamava `limpeza_ia.py`.
+- Sintomas no Kaggle: `No module named 'onnxruntime'`, `No module named 'resemble_enhance'` e `ModuleNotFoundError: No module named 'whisper'` logo apos `Audios brutos importados do R2`.
+- A causa raiz era instalacao ausente das dependencias da limpeza/transcricao, nao erro no R2 nem nos audios.
+- `scripts/run_kaggle_styletts2.py` agora possui `install_audio_cleaning_dependencies()` e chama esse bloco tambem no ramo `f5_tts_ptbr` antes de iniciar a Limpeza IA.
+- Para diagnosticos futuros, conferir se o log mostra `--- Instalando Dependências da Limpeza IA ---` antes de `[INFO] Iniciando Limpeza IA`.
+
 ## [2026-06-05] Observacao do runner Kaggle
 - A limpeza de audio continua independente da retencao de checkpoints, mas o fluxo Kaggle foi ajustado para evitar falso sucesso de treino.
 - O runner mantem o checkpoint mais recente em `Models/super_Voz` apos upload e remove apenas checkpoints anteriores quando um checkpoint mais novo ja foi persistido.
