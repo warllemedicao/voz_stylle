@@ -168,6 +168,7 @@ O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar ini
 - Os artefatos da voz neural ficam separados em `voices/minha_voz_f5_tts_ptbr`.
 - O projeto gera/exporta os arquivos da voz; a inferencia texto-para-audio deve ser feita por outro programa.
 - No modo F5, o fallback LibriTTS fica bloqueado.
+- Quando o checkpoint base PT-BR vem como `.safetensors` de pesos crus (`transformer.*`), o runner cria um checkpoint temporario em formato EMA (`ema_model.transformer.*`) antes do fine-tuning e remove caches `pretrained_*` antigos que poderiam ser escolhidos pelo trainer.
 - O monitor F5 procura checkpoint novo durante o treino e envia para Hugging Face apenas quando o arquivo novo esta estavel.
 - O runner imprime keep-alive periodico no log do Kaggle durante o `accelerate`.
 - Se o treino F5 falhar depois de gerar checkpoint local, o runner tenta sincronizar o ultimo checkpoint antes de encerrar.

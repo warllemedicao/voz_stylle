@@ -1141,6 +1141,74 @@ def f5_checkpoint_path(library_dir: Path, f5_cfg: dict) -> Path:
     raise FileNotFoundError(f"Checkpoint F5-TTS PT-BR nao encontrado em {library_dir}")
 
 
+def normalize_f5_ema_state_dict(state_dict: dict) -> dict:
+    normalized = dict(state_dict)
+    tensor_factory = None
+    for value in normalized.values():
+        if hasattr(value, "new_tensor"):
+            tensor_factory = value.new_tensor
+            break
+
+    has_ema_prefix = any(str(key).startswith("ema_model.") for key in normalized)
+    has_raw_transformer = any(str(key).startswith("transformer.") for key in normalized)
+    if has_raw_transformer and not has_ema_prefix:
+        normalized = {
+            f"ema_model.{key}" if str(key).startswith("transformer.") else key: value
+            for key, value in normalized.items()
+        }
+
+    if tensor_factory and "initted" not in normalized:
+        normalized["initted"] = tensor_factory(True)
+    if tensor_factory and "step" not in normalized:
+        normalized["step"] = tensor_factory(0)
+    return normalized
+
+
+def ensure_f5_pretrain_checkpoint(base_checkpoint: Path, checkpoint_dir: Path) -> Path:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    converted = checkpoint_dir / f"pretrained_{base_checkpoint.stem}_ema.pt"
+    for stale in checkpoint_dir.glob("pretrained_*"):
+        if stale.resolve() == converted.resolve():
+            continue
+        try:
+            stale.unlink()
+            print(f"[F5-TTS-PT-BR] Checkpoint pretrain antigo removido para evitar carga incompatível: {stale.name}")
+        except Exception as exc:
+            print(f"[F5-TTS-PT-BR][AVISO] Nao foi possivel remover pretrain antigo {stale}: {exc}")
+
+    if converted.exists() and converted.stat().st_size > 0:
+        print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível reutilizado: {converted}")
+        return converted
+
+    suffix = base_checkpoint.suffix.lower()
+    if suffix == ".safetensors":
+        print(f"[F5-TTS-PT-BR] Convertendo checkpoint safetensors para formato EMA do trainer: {base_checkpoint}")
+        from safetensors.torch import load_file
+        import torch
+
+        raw_state = load_file(str(base_checkpoint), device="cpu")
+        checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(raw_state)}
+        torch.save(checkpoint, converted)
+        print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
+        return converted
+
+    if suffix in {".pt", ".pth"}:
+        import torch
+
+        loaded = torch.load(base_checkpoint, weights_only=True, map_location="cpu")
+        if isinstance(loaded, dict) and "ema_model_state_dict" in loaded:
+            print(f"[F5-TTS-PT-BR] Checkpoint pretrain já está em formato trainer: {base_checkpoint}")
+            return base_checkpoint
+        if isinstance(loaded, dict):
+            checkpoint = {"ema_model_state_dict": normalize_f5_ema_state_dict(loaded)}
+            torch.save(checkpoint, converted)
+            print(f"[F5-TTS-PT-BR] Checkpoint pretrain compatível criado: {converted}")
+            return converted
+
+    print(f"[F5-TTS-PT-BR][AVISO] Formato de checkpoint nao reconhecido para conversao; usando original: {base_checkpoint}")
+    return base_checkpoint
+
+
 def find_f5_checkpoint_dir(dataset_name: str) -> Path | None:
     code = (
         "from importlib.resources import files\n"
@@ -1463,9 +1531,10 @@ def run_f5_tts_training(
         prepare_cmd.append("--pretrain")
     run(prepare_cmd)
 
-    base_checkpoint = f5_checkpoint_path(f5_library_dir, f5_cfg)
     checkpoint_dir = f5_package_path(f"../../ckpts/{dataset_name}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    base_checkpoint = f5_checkpoint_path(f5_library_dir, f5_cfg)
+    train_pretrain_checkpoint = ensure_f5_pretrain_checkpoint(base_checkpoint, checkpoint_dir)
     finetune_script = f5_package_path("train/finetune_cli.py")
     train_cmd = [
         "accelerate",
@@ -1498,7 +1567,7 @@ def run_f5_tts_training(
         str(int(f5_cfg.get("last_per_updates", 100))),
         "--finetune",
         "--pretrain",
-        str(base_checkpoint),
+        str(train_pretrain_checkpoint),
         "--tokenizer",
         tokenizer,
     ]

@@ -90,6 +90,32 @@ Correcao aplicada:
 - O runner define `DS_BUILD_OPS=0` tambem nesse instalador para evitar compilacao pesada de extensoes DeepSpeed no Kaggle.
 - Para diagnosticos futuros: se Resemble falhar com modulo ausente, verificar se o modulo esta na lista explicita do instalador da limpeza, porque `resemble-enhance --no-deps` nao instala suas dependencias automaticamente.
 
+## Correcao do erro de checkpoint F5 sem `ema_model_state_dict`
+
+Erro observado depois da limpeza e da preparacao do dataset F5:
+
+```text
+RuntimeError: Error(s) in loading state_dict for EMA:
+Missing key(s) in state_dict: "initted", "step", "ema_model.transformer..."
+Unexpected key(s) in state_dict: "transformer..."
+```
+
+Diagnostico:
+
+- A limpeza terminou corretamente e o dataset F5 foi criado com 522 amostras.
+- A falha aconteceu no inicio do `accelerate launch`, dentro de `f5_tts/model/trainer.py`, ao carregar o checkpoint base informado por `--pretrain`.
+- O arquivo `pt-br/model_last.safetensors` da biblioteca PT-BR contem pesos crus com chaves `transformer.*`.
+- O trainer do `f5-tts` atual espera um checkpoint de treino/EMA com chaves `ema_model.transformer.*` e buffers `initted`/`step`.
+- Portanto, o checkpoint base estava correto como pesos de modelo, mas incompatível com o formato esperado pelo carregador de fine-tuning.
+
+Correcao aplicada:
+
+- O runner agora cria um checkpoint pretrain compativel dentro de `ckpts/<dataset_name>/pretrained_*_ema.pt` antes de chamar `finetune_cli.py`.
+- Para `.safetensors`, ele carrega os pesos, adiciona o prefixo `ema_model.` nas chaves `transformer.*` e cria os buffers `initted=True` e `step=0`.
+- Antes de criar/reutilizar o convertido, ele remove `pretrained_*` antigos no diretório de checkpoints F5 para impedir que o trainer escolha um `.safetensors` incompatível deixado por uma execução anterior.
+- O comando `--pretrain` passa a apontar para esse checkpoint convertido, evitando o erro de missing/unexpected keys no EMA.
+- O checkpoint original da biblioteca continua preservado e ainda e usado como referencia no pacote final.
+
 ## Correcao preventiva para GPU P100 no modo F5
 
 Aviso observado no Kaggle:

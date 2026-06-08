@@ -81,6 +81,33 @@ Falha observada durante restauração de áudio:
 
 Isso nao quebra Whisper nem a padronizacao final; o script preserva o original e segue. A causa e que `resemble-enhance` e instalado com `--no-deps` para nao trocar Torch/Torchaudio, entao o runner precisa instalar explicitamente dependencias usadas internamente. O instalador da Limpeza IA agora inclui `deepspeed` e define `DS_BUILD_OPS=0`.
 
+### Checkpoint F5 sem envelope EMA
+
+Falha observada no inicio do treino:
+
+```text
+RuntimeError: Error(s) in loading state_dict for EMA:
+Missing key(s): "initted", "step", "ema_model.transformer..."
+Unexpected key(s): "transformer..."
+```
+
+A limpeza e o dataset ja tinham passado. A causa era o checkpoint PT-BR `pt-br/model_last.safetensors`: ele contem pesos crus `transformer.*`, mas o trainer do `f5-tts` espera um checkpoint EMA `ema_model.transformer.*` para `--pretrain`.
+
+O runner agora converte o checkpoint antes do treino para:
+
+```text
+ckpts/<dataset_name>/pretrained_*_ema.pt
+```
+
+Essa conversao prefixa os pesos como `ema_model.transformer.*` e cria os buffers `initted` e `step`, sem alterar o arquivo original da biblioteca. Antes de criar ou reutilizar o convertido, o runner remove `pretrained_*` antigos em `ckpts/<dataset_name>` para impedir que o trainer escolha um `.safetensors` cru deixado por execucao anterior.
+
+No proximo log, procurar:
+
+```text
+[F5-TTS-PT-BR] Convertendo checkpoint safetensors para formato EMA do trainer
+[F5-TTS-PT-BR] Checkpoint pretrain compatível criado
+```
+
 ### Caminho do `limpeza_ia.py`
 
 O Kaggle falhou com:
