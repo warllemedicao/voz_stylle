@@ -47,6 +47,30 @@ cloudflare_r2:
 
 A config Kaggle ja vem apontando para o R2 de leitura do projeto. Se quiser sobrescrever sem editar o Git, crie Kaggle Secrets com `R2_ENDPOINT_URL`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` e `R2_RAW_AUDIO_PREFIX`. A config runtime do notebook bloqueia apenas upload/sync para R2.
 
+## Biblioteca F5-TTS PT-BR
+
+O pipeline separa a biblioteca/base F5-TTS PT-BR dos checkpoints da voz neural. A config usa:
+
+```yaml
+tts_engine: "f5_tts_ptbr"
+model_library_root: "/kaggle/working/super_voz_model_library"
+f5_voice_package_dir: "minha_voz_f5_tts_ptbr"
+f5_tts_ptbr:
+  repo_id: "firstpixel/F5-TTS-pt-br"
+  local_dir: "/kaggle/working/super_voz_model_library/f5_tts_ptbr"
+  huggingface_remote_dir: "libraries/f5_tts_ptbr"
+  dataset_name: "super_voz_f5_ptbr"
+  checkpoint_subpath: "pt-br/model_last.safetensors"
+  exp_name: "F5TTS_Base"
+  tokenizer: "char"
+```
+
+Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr` do Hugging Face. Se a pasta ainda nao existir, baixa `firstpixel/F5-TTS-pt-br` e envia a biblioteca para essa pasta remota. Os checkpoints/artefatos da voz F5 devem ficar separados no pacote `minha_voz_f5_tts_ptbr`, enquanto o pacote legado `minha_voz_styletts2` continua reservado para StyleTTS2.
+
+Enquanto `tts_engine: "f5_tts_ptbr"` estiver ativo, o fallback LibriTTS em ingles fica bloqueado quando nao houver checkpoint anterior. Isso evita iniciar uma nova voz PT-BR a partir de `yl4579/StyleTTS2-LibriTTS`.
+
+Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote `voices/minha_voz_f5_tts_ptbr`.
+
 ## Entrada de audios
 
 O pipeline primeiro tenta baixar audios brutos do Cloudflare R2 quando `cloudflare_r2.raw_audio_prefix` estiver configurado. Se R2 nao estiver configurado ou nao houver download, ele procura audios brutos nestes caminhos:
@@ -64,6 +88,9 @@ Tambem e possivel anexar um Kaggle Dataset contendo os audios em uma dessas past
 Durante e depois do treino, os principais artefatos ficam em:
 
 ```text
+/kaggle/working/StyleTTS2/minha_voz_f5_tts_ptbr
+/kaggle/working/super_voz_model_library/f5_tts_ptbr
+/kaggle/working/super_voz_f5_dataset
 /kaggle/working/StyleTTS2/minha_voz_styletts2
 /kaggle/working/super_Voz_styletts2_data
 /kaggle/working/super_Voz_outputs
@@ -72,7 +99,7 @@ Durante e depois do treino, os principais artefatos ficam em:
 Ao final, o notebook informa a pasta local do pacote:
 
 ```text
-/kaggle/working/StyleTTS2/minha_voz_styletts2
+/kaggle/working/StyleTTS2/minha_voz_f5_tts_ptbr
 ```
 
 O notebook nao cria uma copia nem um ZIP, pois isso pode duplicar varios gigabytes e causar
@@ -166,9 +193,8 @@ Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` 
 `Audios_processados` depois que o dataset final e o pacote forem criados. O dataset preparado
 da execucao anterior e os WAVs antigos do pacote sao removidos antes de recriar a versao atual.
 Mensagens `[DISCO]` mostram o espaco usado e livre durante o pipeline.
-Quando `best_model.pth` ja foi restaurado, o checkpoint base LibriTTS nao e baixado novamente.
-No primeiro treinamento, esse checkpoint base e removido depois que o primeiro checkpoint da
-voz for sincronizado com sucesso.
+No modo atual F5-TTS PT-BR, o checkpoint base LibriTTS nao e baixado. A base PT-BR fica em
+`libraries/f5_tts_ptbr` e os artefatos da voz ficam em `voices/minha_voz_f5_tts_ptbr`.
 
 Quando o backend usado for `hf buckets sync` ou `hf sync`, o upload usa `--delete`, portanto o
 bucket nao acumula artefatos removidos do pacote. Quando a CLI do Kaggle nao oferece suporte a
@@ -298,11 +324,13 @@ Se encontrar checkpoint de fine-tuning, ele retoma com:
 load_only_params: false
 ```
 
-Se nao encontrar, usa o checkpoint base:
+No modo legado StyleTTS2, se nao encontrar checkpoint, o fallback antigo era:
 
 ```text
 Models/LibriTTS/epochs_2nd_00020.pth
 ```
+
+Esse fallback fica bloqueado quando `tts_engine: "f5_tts_ptbr"` esta ativo.
 
 com:
 

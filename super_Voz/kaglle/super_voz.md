@@ -153,9 +153,19 @@ O Colab pode interromper sessões por limite de uso de GPU antes das 50 epocas. 
 
 - Os orquestradores agora procuram o checkpoint mais recente em `Models/super_Voz/epoch_2nd_*.pth`.
 - Quando um checkpoint de fine-tuning existe, `pretrained_model` passa a apontar para ele e `load_only_params=False`, preservando pesos e estado do otimizador.
-- Quando não existe checkpoint anterior, o pipeline continua usando `Models/LibriTTS/epochs_2nd_00020.pth` com `load_only_params=True`.
+- No modo legado StyleTTS2, quando nao existe checkpoint anterior, o pipeline usava `Models/LibriTTS/epochs_2nd_00020.pth` com `load_only_params=True`. No modo atual F5-TTS PT-BR, esse fallback fica bloqueado.
 - `save_freq` foi reduzido para `1`, salvando a cada epoca.
 - A chamada de treino agora filtra a saída extensa do StyleTTS2 e mostra uma barra compacta por epoca/passo. As linhas completas continuam em `Models/super_Voz/train.log`.
+
+## Atualização F5-TTS PT-BR (08/06/2026)
+
+O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar iniciar vozes PT-BR a partir do LibriTTS em ingles.
+
+- A biblioteca/base F5-TTS PT-BR fica separada em `libraries/f5_tts_ptbr`.
+- Se essa biblioteca ainda nao existir no Hugging Face, o runner baixa `firstpixel/F5-TTS-pt-br` e envia para essa pasta.
+- Os artefatos da voz neural ficam separados em `voices/minha_voz_f5_tts_ptbr`.
+- O projeto gera/exporta os arquivos da voz; a inferencia texto-para-audio deve ser feita por outro programa.
+- No modo F5, o fallback LibriTTS fica bloqueado.
 
 ## Atualização de Progresso no Kaggle (03/06/2026)
 
@@ -189,8 +199,8 @@ hf://buckets/warllem/Super_voz
 - `Audios_brutos` e `Audios_processados` são removidos depois que o dataset final e o pacote forem criados.
 - O dataset preparado de uma execução anterior e os WAVs antigos do pacote são removidos antes de gerar a versão atual.
 - O runner informa o uso e espaço livre do `/kaggle/working` nos pontos principais do pipeline.
-- Quando `best_model.pth` é restaurado, o checkpoint base LibriTTS não é baixado novamente.
-- No primeiro treinamento, o checkpoint base LibriTTS é removido depois que o primeiro checkpoint da voz é enviado.
+- No modo atual F5-TTS PT-BR, o checkpoint base LibriTTS nao e baixado.
+- No modo legado StyleTTS2, a politica antiga de retencao do checkpoint base continua documentada apenas como historico.
 - O pacote inclui `manifest.json`, `config.json`, `tokenizer_config.json`, `api_config.json`, `README.md`, configuração StyleTTS2, dataset preparado, metadata, referência de voz, documentação, requisitos e pesos auxiliares `Utils/ASR`, `Utils/JDC` e `Utils/PLBERT` quando disponíveis.
 - Os metadados seguem uma organização parecida com pacotes do Hugging Face, mas o checkpoint continua em formato StyleTTS2 `.pth` e nao e um modelo nativo de `transformers.pipeline`.
 - Os WAVs preparados também são necessários para retomar o treinamento, pois `train_list.txt` e `val_list.txt` apontam para esses arquivos.
@@ -224,7 +234,7 @@ Arquivos que precisam permanecer no working durante o treino:
 
 O pacote também contém `data_reference/wavs`, mas esses WAVs são criados por hard link para o dataset final quando o sistema de arquivos permite. Assim, eles aparecem em duas pastas sem ocupar o dobro do espaço físico.
 
-O maior pico de uso esperado ocorre no primeiro treinamento, quando o checkpoint base LibriTTS ainda é necessário. Depois que o primeiro checkpoint da voz é enviado com sucesso, o checkpoint base é removido. Nas execuções seguintes, `best_model.pth` é restaurado e o checkpoint base não é baixado.
+No modo atual F5-TTS PT-BR, o maior pico de uso vem da biblioteca/base `firstpixel/F5-TTS-pt-br`, do dataset preparado e dos checkpoints da voz. O checkpoint base LibriTTS nao e baixado nesse modo.
 
 Mensagens com prefixo `[DISCO]` mostram o espaço usado e livre no início, antes do treino, depois da limpeza dos intermediários, após falhas de upload e após a sincronização final.
 

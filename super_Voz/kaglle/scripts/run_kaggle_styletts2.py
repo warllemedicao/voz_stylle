@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import json
 import os
 import re
@@ -887,6 +888,408 @@ def huggingface_restore_package(hf_cfg: dict | None, package_dir: Path) -> bool:
     return False
 
 
+def run_quiet(cmd, cwd=None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+
+def restore_huggingface_subdir(hf_cfg: dict | None, remote_dir: str, local_dir: Path) -> bool:
+    if not hf_cfg or not remote_dir:
+        return False
+
+    repo_id = huggingface_repo_fallback_id(hf_cfg)
+    remote_dir = remote_dir.strip("/")
+    temp_dir = local_dir.parent / f".hf_restore_{local_dir.name}"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        "hf",
+        "download",
+        repo_id,
+        "--include",
+        f"{remote_dir}/**",
+        "--local-dir",
+        str(temp_dir),
+        "--repo-type",
+        "model",
+    ]
+    print(f"[HuggingFace] Tentando restaurar biblioteca: {repo_id}/{remote_dir} -> {local_dir}")
+    result = run_quiet(command)
+    restored_root = temp_dir / remote_dir
+    if result.returncode != 0 or not restored_root.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        print("[HuggingFace][AVISO] Biblioteca remota ainda nao existe ou nao pode ser baixada.")
+        return False
+
+    if local_dir.exists():
+        shutil.rmtree(local_dir)
+    local_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(restored_root), str(local_dir))
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    print(f"[HuggingFace] Biblioteca restaurada em: {local_dir}")
+    return True
+
+
+def upload_huggingface_subdir(hf_cfg: dict | None, local_dir: Path, remote_dir: str) -> bool:
+    if not hf_cfg or not local_dir.exists() or not remote_dir:
+        return False
+
+    repo_id = huggingface_repo_fallback_id(hf_cfg)
+    remote_dir = remote_dir.strip("/")
+    command = [
+        "hf",
+        "upload",
+        repo_id,
+        str(local_dir),
+        remote_dir,
+        "--repo-type",
+        "model",
+    ]
+    print(f"[HuggingFace] Enviando biblioteca: {local_dir} -> {repo_id}/{remote_dir}")
+    result = run(command, check=False)
+    if result.returncode != 0:
+        print("[HuggingFace][AVISO] Upload da biblioteca F5-TTS PT-BR falhou; treino ainda pode usar cache local.")
+        return False
+    return True
+
+
+def ensure_f5_tts_ptbr_library(cfg: dict, hf_cfg: dict | None) -> Path | None:
+    f5_cfg = cfg.get("f5_tts_ptbr", {}) or {}
+    if not f5_cfg.get("enabled", False):
+        return None
+
+    default_root = Path(cfg.get("model_library_root", "/kaggle/working/super_voz_model_library"))
+    local_dir = Path(f5_cfg.get("local_dir", str(default_root / "f5_tts_ptbr")))
+    remote_dir = str(f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr")).strip("/")
+    repo_id = str(f5_cfg.get("repo_id", "firstpixel/F5-TTS-pt-br")).strip()
+
+    if local_dir.exists() and any(local_dir.iterdir()):
+        print(f"[F5-TTS-PT-BR] Biblioteca local encontrada: {local_dir}")
+        return local_dir
+
+    if restore_huggingface_subdir(hf_cfg, remote_dir, local_dir):
+        return local_dir
+
+    if not repo_id:
+        raise RuntimeError("f5_tts_ptbr.repo_id nao configurado e biblioteca nao foi restaurada do Hugging Face.")
+
+    print(f"[F5-TTS-PT-BR] Baixando biblioteca/base de {repo_id} para {local_dir}")
+    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "huggingface_hub"])
+    from huggingface_hub import snapshot_download
+
+    local_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=str(local_dir),
+        local_dir_use_symlinks=False,
+    )
+    print(f"[F5-TTS-PT-BR] Biblioteca/base disponivel em: {local_dir}")
+    upload_huggingface_subdir(hf_cfg, local_dir, remote_dir)
+    return local_dir
+
+
+def install_f5_tts_dependencies() -> None:
+    packages = [
+        "f5-tts",
+        "accelerate",
+        "safetensors",
+        "num2words",
+    ]
+    run([sys.executable, "-m", "pip", "install", "-q", "--upgrade", *packages])
+
+
+def read_voice_metadata_rows(processed_dir: Path) -> list[tuple[str, str]]:
+    metadata = processed_dir / "train.txt"
+    if not metadata.exists():
+        metadata = processed_dir / "metadata.csv"
+    if not metadata.exists():
+        raise FileNotFoundError(f"Metadata da voz nao encontrado em {processed_dir}")
+
+    rows: list[tuple[str, str]] = []
+    with metadata.open("r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        delimiter = "|" if "|" in sample else ","
+        reader = csv.reader(f, delimiter=delimiter)
+        for raw in reader:
+            if not raw or len(raw) < 2:
+                continue
+            file_id = raw[0].strip()
+            text = re.sub(r"\s+", " ", raw[1].strip().lower())
+            if file_id and text and text.upper() != "VAZIO":
+                rows.append((file_id, text.replace("|", " ")))
+    if not rows:
+        raise RuntimeError(f"Nenhuma linha valida encontrada em {metadata}")
+    return rows
+
+
+def resolve_processed_audio(processed_dir: Path, file_id: str) -> Path | None:
+    candidate = Path(file_id)
+    names = [candidate.name]
+    if candidate.suffix.lower() not in AUDIO_EXTS:
+        names.extend(f"{candidate.name}{ext}" for ext in AUDIO_EXTS)
+    for name in names:
+        path = processed_dir / name
+        if path.exists():
+            return path.resolve()
+    return None
+
+
+def write_f5_metadata_csv(processed_dir: Path, out_csv: Path) -> int:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    rows = read_voice_metadata_rows(processed_dir)
+    written = 0
+    missing: list[str] = []
+    with out_csv.open("w", encoding="utf-8", newline="\n") as f:
+        writer = csv.writer(f, delimiter="|")
+        writer.writerow(["audio_file", "text"])
+        for file_id, text in rows:
+            audio_path = resolve_processed_audio(processed_dir, file_id)
+            if not audio_path:
+                missing.append(file_id)
+                continue
+            writer.writerow([audio_path.as_posix(), text])
+            written += 1
+
+    if missing:
+        preview = ", ".join(missing[:10])
+        print(f"[F5-TTS-PT-BR][AVISO] Audios sem arquivo correspondente ignorados: {len(missing)} ({preview})")
+    if written == 0:
+        raise RuntimeError("Nenhum audio valido foi escrito no metadata.csv do F5-TTS.")
+    print(f"[F5-TTS-PT-BR] Metadata CSV criado: {out_csv} ({written} linhas)")
+    return written
+
+
+def f5_checkpoint_path(library_dir: Path, f5_cfg: dict) -> Path:
+    subpath = str(f5_cfg.get("checkpoint_subpath", "pt-br/model_last.safetensors")).strip()
+    checkpoint = library_dir / subpath
+    if checkpoint.exists():
+        return checkpoint
+    candidates = sorted(
+        [*library_dir.rglob("model_last.safetensors"), *library_dir.rglob("model_last.pt"), *library_dir.rglob("*.safetensors")],
+        key=lambda path: (path.name != "model_last.safetensors", len(path.parts), path.as_posix()),
+    )
+    if candidates:
+        print(f"[F5-TTS-PT-BR] Checkpoint base detectado: {candidates[0]}")
+        return candidates[0]
+    raise FileNotFoundError(f"Checkpoint F5-TTS PT-BR nao encontrado em {library_dir}")
+
+
+def find_f5_checkpoint_dir(dataset_name: str) -> Path | None:
+    code = (
+        "from importlib.resources import files\n"
+        "from pathlib import Path\n"
+        f"p = Path(files('f5_tts').joinpath('../../ckpts/{dataset_name}')).resolve()\n"
+        "print(p)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"[F5-TTS-PT-BR][AVISO] Nao foi possivel localizar ckpts do pacote f5_tts: {result.stdout}")
+        return None
+    path = Path(result.stdout.strip())
+    return path if path.exists() else None
+
+
+def f5_package_path(relative_path: str) -> Path:
+    code = (
+        "from importlib.resources import files\n"
+        "from pathlib import Path\n"
+        f"print(Path(files('f5_tts').joinpath('{relative_path}')).resolve())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Nao foi possivel localizar arquivo do pacote f5_tts: {result.stdout}")
+    return Path(result.stdout.strip())
+
+
+def f5_prepared_dataset_dir(dataset_name: str, tokenizer: str) -> Path:
+    return f5_package_path(f"../../data/{dataset_name}_{tokenizer}")
+
+
+def latest_f5_checkpoint(checkpoint_dir: Path) -> Path | None:
+    if not checkpoint_dir or not checkpoint_dir.exists():
+        return None
+    candidates = [
+        path
+        for path in checkpoint_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".pt", ".pth", ".safetensors"}
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime_ns)
+
+
+def materialize_f5_voice_package(
+    package_dir: Path,
+    f5_cfg: dict,
+    f5_library_dir: Path,
+    f5_dataset_dir: Path,
+    processed_dir: Path,
+    base_checkpoint: Path,
+    trained_checkpoint: Path | None,
+) -> None:
+    model_dir = package_dir / "model"
+    data_dir = package_dir / "data_reference"
+    docs_dir = package_dir / "docs"
+    for path in [model_dir, data_dir, docs_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+
+    if trained_checkpoint:
+        replace_with_hardlink_or_copy(trained_checkpoint, model_dir / trained_checkpoint.name)
+        replace_with_hardlink_or_copy(trained_checkpoint, model_dir / f"latest_checkpoint{trained_checkpoint.suffix}")
+    replace_with_hardlink_or_copy(base_checkpoint, model_dir / f"base_checkpoint{base_checkpoint.suffix}")
+    copy_if_exists(f5_dataset_dir / "vocab.txt", model_dir / "vocab.txt")
+    copy_if_exists(f5_dataset_dir / "duration.json", docs_dir / "duration.json")
+    copy_if_exists(f5_dataset_dir / "metadata.csv", data_dir / "metadata.csv")
+
+    wavs = sorted(processed_dir.glob("*.wav"))
+    if wavs:
+        replace_with_hardlink_or_copy(wavs[0], data_dir / "referencia_voz.wav")
+
+    manifest = {
+        "schema_version": 1,
+        "package_name": package_dir.name,
+        "architecture": "F5-TTS",
+        "primary_language": "pt-BR",
+        "inference_runtime_required": True,
+        "base_library": {
+            "repo_id": f5_cfg.get("repo_id", "firstpixel/F5-TTS-pt-br"),
+            "huggingface_remote_dir": f5_cfg.get("huggingface_remote_dir", "libraries/f5_tts_ptbr"),
+            "local_dir": str(f5_library_dir),
+            "checkpoint": str(base_checkpoint.relative_to(f5_library_dir)) if f5_library_dir in base_checkpoint.parents else str(base_checkpoint),
+        },
+        "voice_checkpoint": f"model/{trained_checkpoint.name}" if trained_checkpoint else None,
+        "latest_checkpoint": f"model/latest_checkpoint{trained_checkpoint.suffix}" if trained_checkpoint else None,
+        "tokenizer": f5_cfg.get("tokenizer", "char"),
+        "exp_name": f5_cfg.get("exp_name", "F5TTS_Base"),
+        "notes": "Este pacote contem artefatos da voz neural. A inferencia deve ser feita por outro programa com F5-TTS e a biblioteca/base PT-BR.",
+    }
+    write_json(package_dir / "manifest.json", manifest)
+    (package_dir / "README.md").write_text(
+        "# super_Voz F5-TTS PT-BR\n\n"
+        "Pacote de voz neural treinado/adaptado com F5-TTS PT-BR.\n\n"
+        "Este pacote nao executa inferencia sozinho. O programa de inferencia deve carregar o runtime F5-TTS, "
+        "a biblioteca/base `libraries/f5_tts_ptbr` e o checkpoint desta voz em `model/`.\n",
+        encoding="utf-8",
+    )
+
+
+def run_f5_tts_training(
+    cfg: dict,
+    hf_cfg: dict | None,
+    f5_library_dir: Path,
+    processed_dir: Path,
+) -> Path:
+    f5_cfg = cfg.get("f5_tts_ptbr", {}) or {}
+    install_f5_tts_dependencies()
+
+    dataset_name = str(f5_cfg.get("dataset_name", "super_voz_f5_ptbr")).strip()
+    tokenizer = str(f5_cfg.get("tokenizer", "char"))
+    f5_dataset_dir = f5_prepared_dataset_dir(dataset_name, tokenizer)
+    metadata_work_dir = Path(f5_cfg.get("dataset_dir", "/kaggle/working/super_voz_f5_dataset"))
+    package_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2")) / str(
+        cfg.get("f5_voice_package_dir", "minha_voz_f5_tts_ptbr")
+    )
+    if f5_dataset_dir.exists():
+        shutil.rmtree(f5_dataset_dir)
+    f5_dataset_dir.mkdir(parents=True, exist_ok=True)
+    metadata_work_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_csv = metadata_work_dir / "metadata.csv"
+    write_f5_metadata_csv(processed_dir, metadata_csv)
+
+    prepare_script = f5_package_path("train/datasets/prepare_csv_wavs.py")
+    prepare_cmd = [
+        sys.executable,
+        str(prepare_script),
+        str(metadata_csv),
+        str(f5_dataset_dir),
+        "--workers",
+        str(int(f5_cfg.get("workers", 2))),
+    ]
+    if bool(f5_cfg.get("prepare_as_pretrain", True)):
+        prepare_cmd.append("--pretrain")
+    run(prepare_cmd)
+
+    base_checkpoint = f5_checkpoint_path(f5_library_dir, f5_cfg)
+    finetune_script = f5_package_path("train/finetune_cli.py")
+    train_cmd = [
+        "accelerate",
+        "launch",
+        f"--mixed_precision={f5_cfg.get('mixed_precision', 'fp16')}",
+        str(finetune_script),
+        "--exp_name",
+        str(f5_cfg.get("exp_name", "F5TTS_Base")),
+        "--dataset_name",
+        dataset_name,
+        "--learning_rate",
+        str(f5_cfg.get("learning_rate", 1e-5)),
+        "--batch_size_per_gpu",
+        str(int(f5_cfg.get("batch_size_per_gpu", 1600))),
+        "--batch_size_type",
+        str(f5_cfg.get("batch_size_type", "frame")),
+        "--max_samples",
+        str(int(f5_cfg.get("max_samples", 32))),
+        "--grad_accumulation_steps",
+        str(int(f5_cfg.get("grad_accumulation_steps", 1))),
+        "--epochs",
+        str(int(f5_cfg.get("epochs", 20))),
+        "--num_warmup_updates",
+        str(int(f5_cfg.get("num_warmup_updates", 100))),
+        "--save_per_updates",
+        str(int(f5_cfg.get("save_per_updates", 500))),
+        "--keep_last_n_checkpoints",
+        str(int(f5_cfg.get("keep_last_n_checkpoints", 3))),
+        "--last_per_updates",
+        str(int(f5_cfg.get("last_per_updates", 100))),
+        "--finetune",
+        "--pretrain",
+        str(base_checkpoint),
+        "--tokenizer",
+        tokenizer,
+    ]
+    run(train_cmd)
+
+    checkpoint_dir = find_f5_checkpoint_dir(dataset_name)
+    trained_checkpoint = latest_f5_checkpoint(checkpoint_dir) if checkpoint_dir else None
+    if not trained_checkpoint:
+        raise RuntimeError("Treino F5-TTS terminou, mas nenhum checkpoint da voz foi encontrado.")
+    print(f"[F5-TTS-PT-BR] Ultimo checkpoint da voz: {trained_checkpoint}")
+
+    materialize_f5_voice_package(
+        package_dir,
+        f5_cfg,
+        f5_library_dir,
+        f5_dataset_dir,
+        processed_dir,
+        base_checkpoint,
+        trained_checkpoint,
+    )
+    upload_huggingface_subdir(hf_cfg, package_dir, f"voices/{package_dir.name}")
+    print(f"[F5-TTS-PT-BR] Pacote da voz neural pronto em: {package_dir}")
+    return package_dir
+
+
 def prune_uploaded_checkpoints(checkpoint_dir: Path, uploaded_checkpoint: Path) -> tuple[int, int]:
     checkpoints = sorted(
         [path for path in checkpoint_dir.glob("epoch_2nd_*.pth") if path.is_file()],
@@ -1737,6 +2140,7 @@ def main() -> int:
     data_root = Path(cfg.get("repo_dir", str(repo_dir))).resolve()
     data_root.mkdir(parents=True, exist_ok=True)
     report_working_disk("inicio do pipeline")
+    tts_engine = str(cfg.get("tts_engine", "styletts2")).strip().lower()
 
     # Configuração de memória
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -1751,22 +2155,31 @@ def main() -> int:
         print("🛑 Abortando devido à falta de GPU. O treino falharia com SIGSEGV.")
         return 1
 
-    style_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2"))
-    clone_or_pull(cfg.get("styletts2_repo", "https://github.com/yl4579/StyleTTS2.git"), style_dir)
-    package_dir = style_dir / str(cfg.get("voice_package_dir", "minha_voz_styletts2"))
-
-    restore_styletts2_from_candidates(cfg, style_dir)
-    terabox_cfg = setup_terabox(cfg)
     huggingface_cfg = setup_huggingface(cfg)
-    restored_hf = huggingface_restore_package(huggingface_cfg, package_dir)
-    if huggingface_cfg and not restored_hf:
-        print("[HuggingFace][AVISO] Pacote remoto nao restaurado; o primeiro upload ocorrera no primeiro checkpoint.")
+    style_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2"))
+    terabox_cfg = None
+    f5_library_dir = None
 
-    patch_pytorch_compatibility(style_dir)
-    patch_styletts2_oom_safety(style_dir)
-    patch_styletts2_zero_division_safety(style_dir)
+    if tts_engine == "f5_tts_ptbr":
+        style_dir.mkdir(parents=True, exist_ok=True)
+        f5_library_dir = ensure_f5_tts_ptbr_library(cfg, huggingface_cfg)
+        if f5_library_dir:
+            print(f"[F5-TTS-PT-BR] Biblioteca separada pronta para treino/inferencia: {f5_library_dir}")
+    else:
+        clone_or_pull(cfg.get("styletts2_repo", "https://github.com/yl4579/StyleTTS2.git"), style_dir)
+        package_dir = style_dir / str(cfg.get("voice_package_dir", "minha_voz_styletts2"))
 
-    install_dependencies(style_dir)
+        restore_styletts2_from_candidates(cfg, style_dir)
+        terabox_cfg = setup_terabox(cfg)
+        restored_hf = huggingface_restore_package(huggingface_cfg, package_dir)
+        if huggingface_cfg and not restored_hf:
+            print("[HuggingFace][AVISO] Pacote remoto nao restaurado; o primeiro upload ocorrera no primeiro checkpoint.")
+
+        patch_pytorch_compatibility(style_dir)
+        patch_styletts2_oom_safety(style_dir)
+        patch_styletts2_zero_division_safety(style_dir)
+
+        install_dependencies(style_dir)
     
     # Preparar audios locais
     local_raw = data_root / "Audios_brutos"
@@ -1814,7 +2227,7 @@ def main() -> int:
          print("Dica: configure os Kaggle Secrets R2_* ou anexe um Dataset contendo arquivos .wav/.mp3/.flac.")
          return 1
 
-    print("\n[INFO] Iniciando Limpeza IA (necessário para garantir formato StyleTTS2)...")
+    print("\n[INFO] Iniciando Limpeza IA (necessario para garantir audios consistentes para treino)...")
     run([
         sys.executable,
         str(project_dir / "limpeza_ia.py"),
@@ -1824,6 +2237,15 @@ def main() -> int:
         "--enhancer", "resemble" if cfg.get("enable_resemble_enhance", True) else "auto",
         "--force",
     ], cwd=project_dir)
+
+    if tts_engine == "f5_tts_ptbr":
+        if not f5_library_dir:
+            raise RuntimeError("tts_engine=f5_tts_ptbr, mas a biblioteca F5-TTS PT-BR nao foi preparada.")
+        f5_package_dir = run_f5_tts_training(cfg, huggingface_cfg, f5_library_dir, local_processed)
+        cleanup_intermediate_audio(cfg, local_raw, local_processed)
+        report_working_disk("apos treino/exportacao F5-TTS PT-BR")
+        print("\n✅ Treino F5-TTS PT-BR finalizado! Pacote da voz em:", f5_package_dir)
+        return 0
 
     dataset_dir = Path("/kaggle/working/super_Voz_styletts2_data")
     if cfg.get("cleanup_previous_dataset", True) and dataset_dir.exists():
@@ -1851,6 +2273,12 @@ def main() -> int:
 
     if latest_finetune_checkpoint(style_dir):
         print("[DISCO] Checkpoint da voz restaurado; download do checkpoint base LibriTTS pulado.")
+    elif tts_engine == "f5_tts_ptbr":
+        raise RuntimeError(
+            "Nenhum checkpoint da voz foi encontrado e o fallback LibriTTS em ingles esta bloqueado. "
+            "A biblioteca F5-TTS PT-BR ja foi preparada separadamente; use o runner F5-TTS PT-BR "
+            "para iniciar a nova base/voz neural sem contaminar o treino com LibriTTS."
+        )
     else:
         download_pretrained(style_dir)
     config_path = patch_styletts2_config(style_dir, dataset_dir, cfg)

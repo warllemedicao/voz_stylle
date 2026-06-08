@@ -236,7 +236,7 @@ O runner tenta restaurar automaticamente de caminhos como:
 /kaggle/input/super-voz/styletts2
 ```
 
-Se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning. Se nao encontrar, usa o checkpoint base do LibriTTS.
+No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base LibriTTS em ingles. Ele restaura/baixa a biblioteca `libraries/f5_tts_ptbr`, faz o fine-tuning F5-TTS PT-BR e exporta a voz para `voices/minha_voz_f5_tts_ptbr`. A inferencia deve acontecer em outro programa que carregue esses artefatos.
 
 Durante o treino, o runner nao apaga mais o checkpoint que acabou de enviar. Ele mantem o checkpoint
 mais recente em `Models/super_Voz` e remove apenas checkpoints anteriores quando um checkpoint mais

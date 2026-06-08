@@ -3,9 +3,16 @@ repo_url: "https://github.com/warllemedicao/voz_stylle.git"
 repo_dir: "/kaggle/working/Super_voz"
 project_subdir: "super_Voz"
 
+# Motor TTS principal do projeto.
+# f5_tts_ptbr: usa uma biblioteca/base F5-TTS em portugues brasileiro separada dos checkpoints da voz.
+# styletts2: legado; nao recomendado para PT-BR quando depender do fallback LibriTTS em ingles.
+tts_engine: "f5_tts_ptbr"
+
 styletts2_repo: "https://github.com/yl4579/StyleTTS2.git"
 styletts2_dir: "/kaggle/working/StyleTTS2"
 voice_package_dir: "minha_voz_styletts2"
+f5_voice_package_dir: "minha_voz_f5_tts_ptbr"
+model_library_root: "/kaggle/working/super_voz_model_library"
 output_dir: "/kaggle/working/super_Voz_outputs"
 r2_sync_interval_seconds: 600
 enable_resemble_enhance: true
@@ -25,6 +32,33 @@ huggingface:
   # Intervalo de checagem do monitor. Upload real ocorre apenas quando surge checkpoint novo
   # de epoca ou no encerramento critico/final.
   sync_interval_seconds: 300
+
+# Biblioteca/base F5-TTS PT-BR. Ela fica separada dos checkpoints da voz neural.
+# O runner tenta restaurar esta pasta do Hugging Face primeiro. Se nao existir,
+# baixa de repo_id e envia para f5_tts_ptbr.huggingface_remote_dir para reutilizar nos proximos treinos.
+f5_tts_ptbr:
+  enabled: true
+  repo_id: "firstpixel/F5-TTS-pt-br"
+  local_dir: "/kaggle/working/super_voz_model_library/f5_tts_ptbr"
+  huggingface_remote_dir: "libraries/f5_tts_ptbr"
+  required_for_inference: true
+  dataset_name: "super_voz_f5_ptbr"
+  dataset_dir: "/kaggle/working/super_voz_f5_dataset"
+  checkpoint_subpath: "pt-br/model_last.safetensors"
+  exp_name: "F5TTS_Base"
+  tokenizer: "char"
+  prepare_as_pretrain: true
+  epochs: 20
+  learning_rate: 0.00001
+  batch_size_per_gpu: 1600
+  batch_size_type: "frame"
+  max_samples: 32
+  grad_accumulation_steps: 1
+  num_warmup_updates: 100
+  save_per_updates: 500
+  last_per_updates: 100
+  keep_last_n_checkpoints: 3
+  mixed_precision: "fp16"
 
 # Persistencia opcional via TeraBox.
 # Recomendado: use Kaggle Secrets. Para o modo padrao abaixo, crie:

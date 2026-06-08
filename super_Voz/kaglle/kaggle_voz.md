@@ -6,7 +6,7 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 
 - `run_kaggle_styletts2.ipynb`: notebook one-click para Kaggle.
 - `styletts2_kaggle_config.yml`: configuracao base do pipeline Kaggle.
-- `scripts/run_kaggle_styletts2.py`: runner real do treino StyleTTS2 no Kaggle.
+- `scripts/run_kaggle_styletts2.py`: runner real do treino no Kaggle; no modo atual usa F5-TTS PT-BR.
 - `scripts/prepare_styletts2_dataset.py`: prepara `Audios_processados` para o formato StyleTTS2.
 - `scripts/terabox_uploadercli_sync.py`: wrapper de upload TeraBox via ferramenta comunitaria.
 - `limpeza_ia.py`: limpeza/transcricao dos audios brutos antes do treino.
@@ -26,6 +26,19 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 ```bash
 python -u scripts/run_kaggle_styletts2.py --config styletts2_kaggle_sem_cloudflare.yml
 ```
+
+## Modo atual F5-TTS PT-BR
+
+A configuracao atual usa `tts_engine: "f5_tts_ptbr"`. Nesse modo, o runner:
+
+1. baixa/limpa/transcreve os audios;
+2. restaura `libraries/f5_tts_ptbr` do Hugging Face ou baixa `firstpixel/F5-TTS-pt-br`;
+3. prepara o dataset no formato oficial do F5-TTS;
+4. roda fine-tuning usando o checkpoint PT-BR;
+5. exporta apenas os artefatos da voz neural para `minha_voz_f5_tts_ptbr`;
+6. envia o pacote da voz para `voices/minha_voz_f5_tts_ptbr`.
+
+A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr` e o pacote da voz em `voices/minha_voz_f5_tts_ptbr`.
 
 ## Correcao do erro `Could not resolve host: github.com`
 
@@ -300,7 +313,7 @@ O runner tenta restaurar automaticamente destes caminhos:
 /kaggle/input/super-voz/styletts2
 ```
 
-Se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning com `load_only_params: false`. Se nao encontrar, usa o pretrained LibriTTS base.
+No modo legado StyleTTS2, se encontrar `epoch_2nd_*.pth`, retoma o fine-tuning com `load_only_params: false`. No modo atual F5-TTS PT-BR, o fallback LibriTTS em ingles nao e usado.
 
 A retencao local de checkpoints segue uma janela segura: o checkpoint mais recente permanece em
 `Models/super_Voz` depois do upload, e o runner so remove checkpoints anteriores quando um checkpoint
