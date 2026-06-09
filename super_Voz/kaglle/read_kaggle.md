@@ -29,6 +29,18 @@ super_Voz/kaglle/requirements-kaggle-strict.txt
 
 ## Erro corrigido
 
+### Correção do erro `NameError: name 'HF_HUB_COMPAT_PACKAGE' is not defined`
+
+Após a refatoração modular do script `run_kaggle_styletts2.py`, ocorreu o seguinte erro ao executar o pipeline:
+```text
+NameError: name 'HF_HUB_COMPAT_PACKAGE' is not defined
+```
+Isso aconteceu porque as constantes globais (`HF_HUB_COMPAT_PACKAGE`, `AUDIO_EXTS`, dicionários de configuração de ambiente) que ficavam soltas no topo do arquivo monolítico original não haviam sido transferidas para os submódulos corretos durante a divisão.
+
+Correção aplicada:
+- Movemos todas as constantes globais do pipeline para o início do arquivo `scripts/runner_utils/utils.py`.
+- Como os demais módulos (`cloud_storage.py`, `environment.py`, `f5_integration.py`) iniciam com `from .utils import *`, as constantes voltaram a ficar disponíveis em todo o ecossistema, resolvendo o problema de escopo global.
+
 ### Dependencias da Limpeza IA no modo F5
 
 Falha observada depois do download R2:

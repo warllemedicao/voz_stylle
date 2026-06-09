@@ -386,6 +386,16 @@ Para confirmar, o trecho mais importante do log é o final de `Models/super_Voz/
 - [x] Persistência do pacote completo da voz em Hugging Face Bucket.
 - [x] Retenção do checkpoint mais recente local e remoção apenas dos anteriores após upload confirmado de checkpoint mais novo.
 
+## Refatoração Modular e Estabilidade do Pipeline Kaggle (09/06/2026)
+
+Com o pipeline crescendo para abranger a transição StyleTTS2 -> F5-TTS, integração de nuvem com R2, TeraBox e Hugging Face, o arquivo `run_kaggle_styletts2.py` havia se tornado um monólito frágil (+3.000 linhas), e o projeto começou a sofrer com instabilidades e atualizações surpresa nas bibliotecas do Kaggle (ex: conflitos bruscos com numpy 2.x e o resemble-enhance). 
+
+### Medidas Aplicadas:
+1. **Blindagem de Dependências:** Adição do arquivo `requirements-kaggle-strict.txt` congelando todas as versões validadas (`numpy==1.26.2`, `torch==2.5.1`, `transformers==4.46.3`). Isso interrompe o "Dependency Hell" causado pelas execuções em nuvem.
+2. **Refatoração Modular:** O arquivo `run_kaggle_styletts2.py` foi decomposto usando módulos injetados em `scripts/runner_utils/` (`cloud_storage.py`, `environment.py`, `f5_integration.py`, `utils.py`), tornando a manutenção mais segura e ágil.
+3. **Erradicação da Raiz do ZeroDivisionError:** Adicionado limite físico `--min_seconds=0.8` no `prepare_styletts2_dataset.py`, deletando sumariamente da lista de treinamento arquivos picotados microscópicos que acabavam passando no Whisper, mas quebravam a validação matemática do StyleTTS2/F5-TTS.
+4. **Constantes e Escopo:** Na transição modular, corrigimos o problema de escopo agrupando as constantes de ambiente como `HF_HUB_COMPAT_PACKAGE` dentro do `utils.py`.
+
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE
 O ambiente do Colab e Kaggle **clona este repositório do GitHub**. 
 Se as modificações feitas aqui não forem enviadas para o seu GitHub (**git commit** e **git push**), o Colab continuará rodando a versão antiga e o erro persistirá.
