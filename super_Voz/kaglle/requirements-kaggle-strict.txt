@@ -1,0 +1,42 @@
+# Lockfile de dependências estritas para ambiente Kaggle (super_Voz)
+# Evita "Dependency Hell" e incompatibilidades com Resemble Enhance / GPU P100
+
+# Núcleo Científico (Fixado para compatibilidade com Resemble Enhance / NumPy 1.x)
+numpy==1.26.2
+scipy==1.11.4
+pandas==2.1.3
+matplotlib==3.8.1
+tabulate==0.8.10
+resampy==0.4.2
+
+# Machine Learning & GPU (Fixado para compatibilidade com P100 sm_60 e Transformers)
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+transformers==4.46.3
+accelerate==1.0.1
+safetensors==0.4.5
+deepspeed==0.15.4
+onnxruntime-gpu==1.19.2
+
+# Audio & Limpeza
+librosa==0.10.2.post1
+soundfile==0.12.1
+openai-whisper==20240930
+demucs==4.0.1
+resemble-enhance==0.0.1
+
+# F5-TTS & NLP
+f5-tts==0.1.3
+num2words==0.5.13
+phonemizer==3.2.1
+
+# Infraestrutura & Utilitários
+pyyaml==6.0.2
+boto3==1.35.36
+huggingface_hub>=0.23.2,<1.0
+tqdm==4.66.5
+omegaconf==2.3.0
+ptflops==0.7.4
+celluloid==0.2.0
+rich==13.9.2

@@ -277,8 +277,9 @@ Possiveis otimizacoes futuras:
 
 - gerar MP3 em vez de WAV para transporte;
 - cachear respostas frequentes;
+- empacotar o ambiente via Docker com um servidor FastAPI;
 - testar CPU vs GPU;
-- exportar partes para ONNX;
+- exportar as partes pesadas do decodificador F5-TTS / StyleTTS2 para ONNX (isso derrubaria o tamanho do modelo drasticamente e aceleraria a inferência de 2.24GB para algo que roda em tempo real);
 - quantizar com ONNX Runtime;
 - avaliar TensorRT se usar GPU NVIDIA;
 - avaliar CoreML se usar Apple Silicon.

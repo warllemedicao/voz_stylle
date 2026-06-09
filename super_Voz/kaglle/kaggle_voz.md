@@ -6,8 +6,10 @@ Documento atualizado da pasta `super_Voz/kaglle`, que agora concentra os arquivo
 
 - `run_kaggle_styletts2.ipynb`: notebook one-click para Kaggle.
 - `styletts2_kaggle_config.yml`: configuracao base do pipeline Kaggle.
-- `scripts/run_kaggle_styletts2.py`: runner real do treino no Kaggle; no modo atual usa F5-TTS PT-BR.
-- `scripts/prepare_styletts2_dataset.py`: prepara `Audios_processados` para o formato StyleTTS2.
+- `scripts/run_kaggle_styletts2.py`: ponto de entrada do runner real do treino no Kaggle.
+- `scripts/runner_utils/`: módulos auxiliares gerados pela refatoração (`cloud_storage.py`, `environment.py`, `f5_integration.py`).
+- `requirements-kaggle-strict.txt`: lockfile de dependências estritas para evitar "Dependency Hell" e conflitos com versões como `numpy 2.x`.
+- `scripts/prepare_styletts2_dataset.py`: prepara `Audios_processados` para o formato StyleTTS2 (agora com descarte de áudios excessivamente curtos para evitar OOM e ZeroDivisionError).
 - `scripts/terabox_uploadercli_sync.py`: wrapper de upload TeraBox via ferramenta comunitaria.
 - `limpeza_ia.py`: limpeza/transcricao dos audios brutos antes do treino.
 - `run_kaggle_oneclick.py`: bootstrap alternativo simples.

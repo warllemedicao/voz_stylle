@@ -12,10 +12,19 @@ O notebook principal e:
 super_Voz/kaglle/run_kaggle_styletts2.ipynb
 ```
 
-O runner real e:
+O runner real foi refatorado para uma arquitetura modular. O ponto de entrada é:
 
 ```text
 super_Voz/kaglle/scripts/run_kaggle_styletts2.py
+```
+Que importa as lógicas isoladas de:
+```text
+super_Voz/kaglle/scripts/runner_utils/
+```
+
+Para evitar o "Dependency Hell", as dependências essenciais e testadas do Kaggle foram engessadas no arquivo:
+```text
+super_Voz/kaglle/requirements-kaggle-strict.txt
 ```
 
 ## Erro corrigido

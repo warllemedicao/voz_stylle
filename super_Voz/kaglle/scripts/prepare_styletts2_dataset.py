@@ -133,6 +133,7 @@ def main() -> int:
     parser.add_argument("--phonemize", action="store_true")
     parser.add_argument("--phonemizer_language", default="pt-br")
     parser.add_argument("--max_seconds", type=float, default=12.0)
+    parser.add_argument("--min_seconds", type=float, default=0.8, help="Descarta audios muito curtos para evitar ZeroDivisionError.")
     parser.add_argument("--max_text_chars", type=int, default=280)
     args = parser.parse_args()
 
@@ -166,9 +167,13 @@ def main() -> int:
             continue
 
         duration = audio_duration_seconds(src)
-        if duration is not None and args.max_seconds and duration > args.max_seconds:
-            skipped_long_audio.append(f"{file_id}|seconds={duration:.2f}")
-            continue
+        if duration is not None:
+            if args.max_seconds and duration > args.max_seconds:
+                skipped_long_audio.append(f"{file_id}|seconds={duration:.2f}")
+                continue
+            if args.min_seconds and duration < args.min_seconds:
+                print(f"[AVISO] Ignorando {file_id} por ser muito curto ({duration:.2f}s). Evita ZeroDivisionError.")
+                continue
 
         dst_name = f"{idx:05d}_{src.stem}.wav"
         convert_audio(src, wav_dir / dst_name, args.sample_rate)
