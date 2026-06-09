@@ -227,6 +227,25 @@ Assim, o codigo roda da pasta Kaggle correta, mas os dados continuam em:
 /kaggle/working/Super_voz/Audios_processados
 ```
 
+## Correção de Escopo e Importação no Módulo F5
+
+Em 09/06/2026 foi corrigido um erro de execução no modo F5-TTS PT-BR.
+
+### Erro observado
+```text
+NameError: name 'restore_huggingface_subdir' is not defined
+```
+
+### Causa
+A função `ensure_f5_tts_ptbr_library` no módulo `f5_integration.py` tentava chamar `restore_huggingface_subdir`, que estava definido no módulo `cloud_storage.py`, mas não havia sido importada. Além disso, existia duplicidade de lógica de sincronização F5 entre os dois módulos.
+
+### Correções aplicadas
+1. **Importação explícita:** O módulo `f5_integration.py` agora importa `restore_huggingface_subdir` e `upload_huggingface_subdir` do módulo `.cloud_storage`.
+2. **Consolidação de Lógica:** As funções `sync_f5_voice_checkpoint` e `start_f5_checkpoint_sync` foram movidas do módulo de armazenamento genérico (`cloud_storage.py`) para o módulo especializado (`f5_integration.py`).
+3. **Limpeza de redundância:** Removida a versão duplicada e incompleta de `materialize_f5_voice_package` que residia fora de seu módulo de origem.
+
+Esta alteração garante a integridade do pipeline F5 no Kaggle e mantém a arquitetura modular limpa, com cada submódulo sendo responsável por seu próprio motor TTS.
+
 ## Secrets TeraBox no Kaggle
 
 Para o upload TeraBox funcionar, crie um secret separado para cada item em:

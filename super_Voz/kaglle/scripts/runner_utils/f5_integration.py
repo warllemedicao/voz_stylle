@@ -13,6 +13,7 @@ import importlib
 import importlib.metadata
 from pathlib import Path
 from .utils import *
+from .cloud_storage import restore_huggingface_subdir, upload_huggingface_subdir
 
 def f5_library_vocab_path(library_dir: Path, f5_cfg: dict) -> Path | None:
     subpath = str(f5_cfg.get("base_vocab_subpath", "vocab.txt")).strip()
@@ -526,6 +527,82 @@ def run_f5_tts_training(
     if training_error:
         raise training_error
     return package_dir
+
+def sync_f5_voice_checkpoint(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    f5_cfg: dict,
+    f5_library_dir: Path,
+    f5_dataset_dir: Path,
+    processed_dir: Path,
+    base_checkpoint: Path,
+    checkpoint: Path,
+    reason: str,
+) -> bool:
+    materialize_f5_voice_package(
+        package_dir,
+        f5_cfg,
+        f5_library_dir,
+        f5_dataset_dir,
+        processed_dir,
+        base_checkpoint,
+        checkpoint,
+    )
+    print(f"[F5-TTS-PT-BR] Sincronizando checkpoint ({reason}): {checkpoint.name}")
+    return upload_huggingface_subdir(hf_cfg, package_dir, f"voices/{package_dir.name}")
+
+def start_f5_checkpoint_sync(
+    hf_cfg: dict | None,
+    package_dir: Path,
+    f5_cfg: dict,
+    f5_library_dir: Path,
+    f5_dataset_dir: Path,
+    processed_dir: Path,
+    base_checkpoint: Path,
+    checkpoint_dir: Path,
+    poll_interval_seconds: int,
+    stable_seconds: int,
+    keep_last_checkpoints: int,
+) -> tuple[threading.Event, threading.Thread] | tuple[None, None]:
+    if not hf_cfg:
+        return None, None
+
+    stop_event = threading.Event()
+
+    def worker() -> None:
+        last_uploaded = f5_cfg.get("_last_uploaded_checkpoint")
+        while not stop_event.wait(poll_interval_seconds):
+            try:
+                latest = latest_f5_checkpoint(checkpoint_dir)
+                current_state = f5_checkpoint_state(latest)
+                if not latest or not current_state or current_state == last_uploaded:
+                    continue
+                if not is_stable_file(latest, min_age_seconds=stable_seconds):
+                    continue
+                if sync_f5_voice_checkpoint(
+                    hf_cfg,
+                    package_dir,
+                    f5_cfg,
+                    f5_library_dir,
+                    f5_dataset_dir,
+                    processed_dir,
+                    base_checkpoint,
+                    latest,
+                    reason="checkpoint novo durante treino",
+                ):
+                    last_uploaded = current_state
+                    f5_cfg["_last_uploaded_checkpoint"] = current_state
+                    prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
+            except Exception as exc:
+                print(f"[F5-TTS-PT-BR][AVISO] Falha no monitor de checkpoint: {exc}")
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    print(
+        "[F5-TTS-PT-BR] Monitor de checkpoints ativo; "
+        f"checagem a cada {poll_interval_seconds}s e upload somente para checkpoint novo estavel."
+    )
+    return stop_event, thread
 
 def read_voice_metadata_rows(processed_dir: Path) -> list[tuple[str, str]]:
     metadata = processed_dir / "train.txt"
