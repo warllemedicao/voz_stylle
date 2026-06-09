@@ -14,6 +14,7 @@ import importlib.metadata
 from pathlib import Path
 from .utils import *
 from .cloud_storage import restore_huggingface_subdir, upload_huggingface_subdir
+from .environment import install_f5_tts_dependencies
 
 def f5_library_vocab_path(library_dir: Path, f5_cfg: dict) -> Path | None:
     subpath = str(f5_cfg.get("base_vocab_subpath", "vocab.txt")).strip()
