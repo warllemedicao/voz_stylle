@@ -66,6 +66,12 @@ f5_tts_ptbr:
   expected_vocab_rows: 2546
   exp_name: "F5TTS_v1_Base"
   tokenizer: "char"
+  save_per_updates: 1000
+  last_per_updates: 500
+  keep_last_n_checkpoints: 1
+  runtime_tmp_dir: "/kaggle/working/super_voz_runtime_tmp"
+  runtime_cache_dir: "/kaggle/working/super_voz_runtime_cache"
+  disable_wandb: true
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30
   local_checkpoint_keep_last: 1
@@ -113,6 +119,27 @@ OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
 O aviso `empty or missing yaml metadata in README.md` do Hugging Face era apenas validacao do repo card. A causa operacional era a concorrencia entre o monitor F5 e o trainer: o arquivo `model_last.pt` e regravado no mesmo caminho durante o treino, o pacote usava hardlink/copia desse arquivo vivo e o upload podia ler o mesmo checkpoint enquanto o `accelerate` ainda mantinha processos temporarios em `/tmp`. Isso aumentava a chance de falha de I/O/SIGBUS no Kaggle.
 
 Correcao aplicada: o pacote F5 agora copia checkpoints com arquivo temporario real, sem hardlink para o checkpoint vivo; o monitor guarda o primeiro checkpoint como snapshot pendente; so envia esse snapshot quando o checkpoint seguinte ja existe e esta estavel; depois do upload confirmado, apaga o snapshot anterior e mantem apenas o checkpoint atual no working. No encerramento, o ultimo checkpoint ainda e enviado como sincronizacao final. Os uploads vao para a pasta separada `voices/<inicial>_minha_voz_f5_tts_ptbr`, nunca para a biblioteca pre-treinada `libraries/f5_tts_ptbr_tharyck`.
+
+## Diagnostico do SIGBUS/OSError no update 1500
+
+Na falha seguinte, o treino caiu em `Epoch 3/20`, no `update=1500`, com:
+
+```text
+subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>
+OSError: [Errno 5] Input/output error: '/tmp/tmp...wandb-media'
+OSError: [Errno 5] Input/output error: '/tmp/tmp...wandb-artifacts'
+OSError: [Errno 5] Input/output error: '/usr/local/lib/python3.12/dist-packages/tabulate.py'
+OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
+```
+
+Comparacao com o erro anterior: desta vez nao havia log de `Sincronizando checkpoint` imediatamente antes da queda. O ponto de falha coincide com `save_per_updates=500` no terceiro salvamento grande (`500`, `1000`, `1500`) e tambem havia temporarios W&B/multiprocessing em `/tmp`. A causa plausivel deixou de ser upload concorrente do checkpoint vivo e passou a ser pressao/falha de I/O no runtime do Kaggle durante checkpoint do F5, agravada por temporarios em `/tmp` e escrita frequente de checkpoints.
+
+Atuacao aplicada:
+
+- O runner agora cria `runtime_tmp_dir` e `runtime_cache_dir` em `/kaggle/working` antes do `accelerate launch`.
+- `TMPDIR`, `TEMP`, `TMP`, `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, `HF_HOME`, `TORCH_HOME` e `XDG_CACHE_HOME` passam a apontar explicitamente para essas pastas no processo do treino F5.
+- W&B fica desabilitado por padrao no treino F5 (`WANDB_MODE=disabled`, `WANDB_DISABLED=true`) porque nao e necessario para gerar o checkpoint e apareceu nos erros de limpeza.
+- A cadencia de checkpoint F5 foi aliviada para `save_per_updates: 1000`, `last_per_updates: 500` e `keep_last_n_checkpoints: 1`, reduzindo escritas grandes e delecoes durante a mesma epoca. O custo e poder perder ate cerca de 500 updates em uma interrupcao brusca, mas diminui a chance de `SIGBUS` por I/O.
 
 ## Entrada de audios
 

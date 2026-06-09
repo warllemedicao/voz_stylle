@@ -471,6 +471,7 @@ def run_f5_tts_training(
     target_vocab_rows = f5_dataset_vocab_rows(f5_dataset_dir)
     train_pretrain_checkpoint = ensure_f5_pretrain_checkpoint(base_checkpoint, checkpoint_dir, target_vocab_rows)
     finetune_script = f5_package_path("train/finetune_cli.py")
+    configure_f5_training_io(cfg, f5_cfg)
     train_cmd = [
         "accelerate",
         "launch",
@@ -725,3 +726,34 @@ def save_f5_trainer_checkpoint(checkpoint: dict, destination: Path) -> None:
         torch.save(checkpoint, destination, _use_new_zipfile_serialization=False)
     except TypeError:
         torch.save(checkpoint, destination)
+
+def configure_f5_training_io(cfg: dict, f5_cfg: dict) -> Path:
+    runtime_tmp = Path(f5_cfg.get("runtime_tmp_dir", "/kaggle/working/super_voz_runtime_tmp"))
+    cache_root = Path(f5_cfg.get("runtime_cache_dir", "/kaggle/working/super_voz_runtime_cache"))
+    runtime_tmp.mkdir(parents=True, exist_ok=True)
+    cache_root.mkdir(parents=True, exist_ok=True)
+
+    env_defaults = {
+        "TMPDIR": runtime_tmp,
+        "TEMP": runtime_tmp,
+        "TMP": runtime_tmp,
+        "WANDB_DIR": cache_root / "wandb",
+        "WANDB_CACHE_DIR": cache_root / "wandb_cache",
+        "WANDB_CONFIG_DIR": cache_root / "wandb_config",
+        "HF_HOME": cache_root / "huggingface",
+        "TORCH_HOME": cache_root / "torch",
+        "XDG_CACHE_HOME": cache_root / "xdg",
+    }
+    for key, value in env_defaults.items():
+        target = Path(value)
+        target.mkdir(parents=True, exist_ok=True)
+        os.environ[key] = str(target)
+
+    if bool(f5_cfg.get("disable_wandb", True)):
+        os.environ["WANDB_MODE"] = "disabled"
+        os.environ["WANDB_DISABLED"] = "true"
+        os.environ["WANDB_SILENT"] = "true"
+
+    print(f"[F5-TTS-PT-BR] Temporarios/cache do treino direcionados para: {runtime_tmp}")
+    report_working_disk("antes do treino F5")
+    return runtime_tmp

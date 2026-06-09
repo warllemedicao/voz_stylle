@@ -64,11 +64,14 @@ f5_tts_ptbr:
   max_samples: 32
   grad_accumulation_steps: 1
   num_warmup_updates: 100
-  save_per_updates: 500
-  last_per_updates: 100
-  keep_last_n_checkpoints: 2
+  save_per_updates: 1000
+  last_per_updates: 500
+  keep_last_n_checkpoints: 1
   local_checkpoint_keep_last: 1
   mixed_precision: "fp16"
+  runtime_tmp_dir: "/kaggle/working/super_voz_runtime_tmp"
+  runtime_cache_dir: "/kaggle/working/super_voz_runtime_cache"
+  disable_wandb: true
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30
   keepalive_interval_seconds: 120

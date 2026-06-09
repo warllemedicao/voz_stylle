@@ -466,6 +466,30 @@ O aviso `empty or missing yaml metadata in README.md` do Hugging Face era inofen
 
 Correcao: materializacao F5 por copia real, snapshot pendente fora do pacote, upload apenas do checkpoint anterior quando o proximo checkpoint estavel ja existe, limpeza do snapshot enviado e retencao local padrao de 1 checkpoint atual. O destino remoto dos checkpoints novos fica em `voices/<inicial>_minha_voz_f5_tts_ptbr`, separado da biblioteca/base `libraries/f5_tts_ptbr_tharyck`.
 
+### Historico 09/06/2026: SIGBUS/OSError no update 1500
+
+A falha posterior tambem ocorreu em `Epoch 3/20`, mas o contexto mudou:
+
+```text
+Epoch 3/20 ... loss=0.381, update=1500
+subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>
+OSError: [Errno 5] Input/output error: '/tmp/tmp...wandb-media'
+OSError: [Errno 5] Input/output error: '/tmp/tmp...wandb-artifacts'
+OSError: [Errno 5] Input/output error: '/usr/local/lib/python3.12/dist-packages/tabulate.py'
+OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
+```
+
+Diferenca para a falha anterior: nao apareceu `Sincronizando checkpoint` imediatamente antes do `SIGBUS`, entao a evidencia nao aponta mais para upload concorrente do checkpoint vivo. O `update=1500` coincide com a configuracao antiga `save_per_updates=500`, ou seja, o terceiro salvamento grande do F5. Os erros de `wandb-media`, `wandb-artifacts`, `pymp-*` e ate leitura de `tabulate.py` indicam I/O instavel no runtime/overlay do Kaggle durante ou logo apos a escrita do checkpoint.
+
+Atuacao aplicada para reduzir reincidencia:
+
+- Antes do `accelerate launch`, o runner configura temporarios/cache em `/kaggle/working/super_voz_runtime_tmp` e `/kaggle/working/super_voz_runtime_cache`.
+- O ambiente herdado pelo treino passa a preferir essas pastas para `TMPDIR`, `TEMP`, `TMP`, `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, `HF_HOME`, `TORCH_HOME` e `XDG_CACHE_HOME`.
+- W&B fica desabilitado por padrao no F5 (`disable_wandb: true`), removendo a criacao de `wandb-media` e `wandb-artifacts` em `/tmp`.
+- A configuracao F5 agora reduz a frequencia de checkpoint: `save_per_updates: 1000`, `last_per_updates: 500`, `keep_last_n_checkpoints: 1`.
+
+Se ainda ocorrer `SIGBUS` nesse ponto, o proximo ajuste conservador e aumentar `save_per_updates`/`last_per_updates` para `2000` ou baixar `batch_size_per_gpu`/`max_samples`, mas a primeira suspeita deve continuar sendo I/O do runtime, nao vocabulario/checkpoint base.
+
 ## Se der erro
 
 Enviar o trecho do log a partir de:
