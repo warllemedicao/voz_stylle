@@ -334,6 +334,19 @@ def f5_package_path(relative_path: str) -> Path:
 def f5_prepared_dataset_dir(dataset_name: str, tokenizer: str) -> Path:
     return f5_package_path(f"../../data/{dataset_name}_{tokenizer}")
 
+def f5_voice_package_name(processed_dir: Path, base_name: str) -> str:
+    wavs = sorted(processed_dir.glob("*.wav"), key=lambda path: path.name.lower())
+    source = wavs[0].stem if wavs else base_name
+    initial = "voz"
+    for char in source:
+        if char.isascii() and char.isalnum():
+            initial = char.lower()
+            break
+    safe_base_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", base_name.strip().strip("/")) or "minha_voz_f5_tts_ptbr"
+    package_name = f"{initial}_{safe_base_name}"
+    print(f"[F5-TTS-PT-BR] Pasta da voz/checkpoints definida pela inicial do audio '{source}': {package_name}")
+    return package_name
+
 def latest_f5_checkpoint(checkpoint_dir: Path) -> Path | None:
     if not checkpoint_dir or not checkpoint_dir.exists():
         return None
@@ -425,9 +438,11 @@ def run_f5_tts_training(
     tokenizer = str(f5_cfg.get("tokenizer", "char"))
     f5_dataset_dir = f5_prepared_dataset_dir(dataset_name, tokenizer)
     metadata_work_dir = Path(f5_cfg.get("dataset_dir", "/kaggle/working/super_voz_f5_dataset"))
-    package_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2")) / str(
-        cfg.get("f5_voice_package_dir", "minha_voz_f5_tts_ptbr")
-    )
+    base_package_name = str(cfg.get("f5_voice_package_dir", "minha_voz_f5_tts_ptbr"))
+    voice_package_name = f5_voice_package_name(processed_dir, base_package_name)
+    package_dir = Path(cfg.get("styletts2_dir", "/kaggle/working/StyleTTS2")) / voice_package_name
+    f5_cfg["_voice_package_name"] = voice_package_name
+    f5_cfg["_voice_remote_dir"] = f"voices/{voice_package_name}"
     if f5_dataset_dir.exists():
         shutil.rmtree(f5_dataset_dir)
     f5_dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -587,7 +602,8 @@ def sync_f5_voice_checkpoint(
         checkpoint,
     )
     print(f"[F5-TTS-PT-BR] Sincronizando checkpoint ({reason}): {checkpoint.name}")
-    return upload_huggingface_subdir(hf_cfg, package_dir, f"voices/{package_dir.name}")
+    remote_dir = str(f5_cfg.get("_voice_remote_dir") or f"voices/{package_dir.name}").strip("/")
+    return upload_huggingface_subdir(hf_cfg, package_dir, remote_dir)
 
 def start_f5_checkpoint_sync(
     hf_cfg: dict | None,

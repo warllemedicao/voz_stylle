@@ -951,6 +951,7 @@ def materialize_f5_voice_package(
     manifest = {
         "schema_version": 1,
         "package_name": package_dir.name,
+        "huggingface_remote_dir": f"voices/{package_dir.name}",
         "architecture": "F5-TTS",
         "primary_language": "pt-BR",
         "inference_runtime_required": True,

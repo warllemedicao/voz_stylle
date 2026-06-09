@@ -72,7 +72,9 @@ f5_tts_ptbr:
   keepalive_interval_seconds: 120
 ```
 
-Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr_tharyck` do Hugging Face. Se a pasta ainda nao existir ou estiver incompatível, baixa `Tharyck/multispeaker-ptbr-f5tts` e envia a biblioteca para essa pasta remota. O download e limitado aos arquivos necessarios (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias), evitando puxar todos os checkpoints grandes do repositorio. Os checkpoints/artefatos da voz F5 ficam separados no pacote `minha_voz_f5_tts_ptbr`, enquanto o pacote legado `minha_voz_styletts2` continua reservado para StyleTTS2.
+Na primeira execucao, o runner tenta restaurar `libraries/f5_tts_ptbr_tharyck` do Hugging Face. Se a pasta ainda nao existir ou estiver incompatível, baixa `Tharyck/multispeaker-ptbr-f5tts` e envia a biblioteca para essa pasta remota. O download e limitado aos arquivos necessarios (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias), evitando puxar todos os checkpoints grandes do repositorio.
+
+Os checkpoints/artefatos da voz F5 nunca sao enviados para `libraries/f5_tts_ptbr_tharyck`. Eles ficam separados em `voices/<inicial>_minha_voz_f5_tts_ptbr`, onde `<inicial>` e o primeiro caractere alfanumerico do primeiro audio `.wav` processado. Isso evita misturar checkpoint novo com a pasta pre-treinada que o runner verifica/restaura no inicio do treino e facilita localizar a voz pelo audio usado.
 
 Enquanto `tts_engine: "f5_tts_ptbr"` estiver ativo, o fallback LibriTTS em ingles fica bloqueado quando nao houver checkpoint anterior. Isso evita iniciar uma nova voz PT-BR a partir de `yl4579/StyleTTS2-LibriTTS`.
 
@@ -90,9 +92,9 @@ Como o runner precisa importar `torch` para detectar a GPU antes do `pip install
 
 O mesmo vale para a limpeza: instalar os pins do Resemble (`numpy==1.26.2`, `scipy==1.11.4`, `pandas==2.1.3`) no mesmo processo que ja carregou bibliotecas cientificas pode gerar erro ABI como `numpy.dtype size changed` ou `cannot import name 'broadcast_to'`. A verificacao de dependencias da limpeza agora roda em subprocesso limpo e, quando passa, o runner reinicia uma vez com `SUPER_VOZ_AUDIO_DEPS_REEXECED=1`. Na volta, ele pula a reinstalacao da limpeza e apenas valida os modulos. O `huggingface_hub` tambem foi fixado em `>=0.23.2,<1.0` para continuar compatível com `transformers==4.46.3`.
 
-Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote `voices/minha_voz_f5_tts_ptbr`.
+Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote `voices/<inicial>_minha_voz_f5_tts_ptbr`.
 
-Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, ele cria um snapshot local pendente. O upload durante o treino acontece somente quando um checkpoint mais novo ja existe: nesse momento o runner envia o snapshot anterior para `voices/minha_voz_f5_tts_ptbr`, remove o snapshot enviado e deixa o checkpoint atual no working. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
+Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, ele cria um snapshot local pendente. O upload durante o treino acontece somente quando um checkpoint mais novo ja existe: nesse momento o runner envia o snapshot anterior para `voices/<inicial>_minha_voz_f5_tts_ptbr`, remove o snapshot enviado e deixa o checkpoint atual no working. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
 
 Se o processo de treino falhar depois de algum checkpoint local existir, o runner ainda tenta sincronizar o ultimo checkpoint antes de encerrar. Se o monitor ja tiver enviado exatamente esse checkpoint, o upload final duplicado e pulado.
 
@@ -110,7 +112,7 @@ OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
 
 O aviso `empty or missing yaml metadata in README.md` do Hugging Face era apenas validacao do repo card. A causa operacional era a concorrencia entre o monitor F5 e o trainer: o arquivo `model_last.pt` e regravado no mesmo caminho durante o treino, o pacote usava hardlink/copia desse arquivo vivo e o upload podia ler o mesmo checkpoint enquanto o `accelerate` ainda mantinha processos temporarios em `/tmp`. Isso aumentava a chance de falha de I/O/SIGBUS no Kaggle.
 
-Correcao aplicada: o pacote F5 agora copia checkpoints com arquivo temporario real, sem hardlink para o checkpoint vivo; o monitor guarda o primeiro checkpoint como snapshot pendente; so envia esse snapshot quando o checkpoint seguinte ja existe e esta estavel; depois do upload confirmado, apaga o snapshot anterior e mantem apenas o checkpoint atual no working. No encerramento, o ultimo checkpoint ainda e enviado como sincronizacao final.
+Correcao aplicada: o pacote F5 agora copia checkpoints com arquivo temporario real, sem hardlink para o checkpoint vivo; o monitor guarda o primeiro checkpoint como snapshot pendente; so envia esse snapshot quando o checkpoint seguinte ja existe e esta estavel; depois do upload confirmado, apaga o snapshot anterior e mantem apenas o checkpoint atual no working. No encerramento, o ultimo checkpoint ainda e enviado como sincronizacao final. Os uploads vao para a pasta separada `voices/<inicial>_minha_voz_f5_tts_ptbr`, nunca para a biblioteca pre-treinada `libraries/f5_tts_ptbr_tharyck`.
 
 ## Entrada de audios
 
@@ -129,7 +131,7 @@ Tambem e possivel anexar um Kaggle Dataset contendo os audios em uma dessas past
 Durante e depois do treino, os principais artefatos ficam em:
 
 ```text
-/kaggle/working/StyleTTS2/minha_voz_f5_tts_ptbr
+/kaggle/working/StyleTTS2/<inicial>_minha_voz_f5_tts_ptbr
 /kaggle/working/super_voz_model_library/f5_tts_ptbr
 /kaggle/working/super_voz_f5_dataset
 /kaggle/working/StyleTTS2/minha_voz_styletts2
@@ -140,7 +142,7 @@ Durante e depois do treino, os principais artefatos ficam em:
 Ao final, o notebook informa a pasta local do pacote:
 
 ```text
-/kaggle/working/StyleTTS2/minha_voz_f5_tts_ptbr
+/kaggle/working/StyleTTS2/<inicial>_minha_voz_f5_tts_ptbr
 ```
 
 O notebook nao cria uma copia nem um ZIP, pois isso pode duplicar varios gigabytes e causar
@@ -235,7 +237,7 @@ Para reduzir o uso do `/kaggle/working`, o runner tambem remove `Audios_brutos` 
 da execucao anterior e os WAVs antigos do pacote sao removidos antes de recriar a versao atual.
 Mensagens `[DISCO]` mostram o espaco usado e livre durante o pipeline.
 No modo atual F5-TTS PT-BR, o checkpoint base LibriTTS nao e baixado. A base PT-BR fica em
-`libraries/f5_tts_ptbr_tharyck` e os artefatos da voz ficam em `voices/minha_voz_f5_tts_ptbr`.
+`libraries/f5_tts_ptbr_tharyck` e os artefatos da voz ficam em `voices/<inicial>_minha_voz_f5_tts_ptbr`.
 
 Quando o backend usado for `hf buckets sync` ou `hf sync`, o upload usa `--delete`, portanto o
 bucket nao acumula artefatos removidos do pacote. Quando a CLI do Kaggle nao oferece suporte a

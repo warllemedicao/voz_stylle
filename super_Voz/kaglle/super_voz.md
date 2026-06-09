@@ -169,10 +169,10 @@ O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar ini
 
 - A biblioteca/base F5-TTS PT-BR fica separada em `libraries/f5_tts_ptbr_tharyck`.
 - A base atual usa `Tharyck/multispeaker-ptbr-f5tts`, persistida em `libraries/f5_tts_ptbr_tharyck`, porque publica `vocab.txt`, `setting.json` e checkpoints compativeis com F5-TTS.
-- Os artefatos da voz neural ficam separados em `voices/minha_voz_f5_tts_ptbr`.
+- Os artefatos da voz neural ficam separados em `voices/<inicial>_minha_voz_f5_tts_ptbr`, onde `<inicial>` vem do primeiro audio `.wav` processado.
 - O projeto gera/exporta os arquivos da voz; a inferencia texto-para-audio deve ser feita por outro programa.
 - No modo F5, o fallback LibriTTS fica bloqueado.
-- O runner baixa apenas os arquivos necessarios da base Tharyck (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias) para evitar puxar todos os checkpoints grandes do repositorio.
+- O runner baixa apenas os arquivos necessarios da base Tharyck (`model_last.safetensors`, `vocab.txt`, `setting.json`, README e referencias) para evitar puxar todos os checkpoints grandes do repositorio. Checkpoints novos da voz nao sao enviados para essa pasta de base.
 - Quando `use_base_vocab: true`, o runner copia o `vocab.txt` da biblioteca base para o dataset F5 depois de `prepare_csv_wavs.py`, mantendo as 2546 linhas do embedding textual (`len(vocab) + 1`) em vez de reduzir a camada para o vocabulario pequeno da voz.
 - Quando o checkpoint base PT-BR vem como `.safetensors` de pesos crus (`transformer.*`), o runner cria um checkpoint temporario em formato EMA (`ema_model.transformer.*`) antes do fine-tuning e remove caches `pretrained_*` antigos que poderiam ser escolhidos pelo trainer. Se o embedding de texto do checkpoint divergir do vocabulario ativo, o runner ajusta `ema_model.transformer.text_embed.text_embed.weight` para `len(vocab.txt) + 1` linhas durante a conversao.
 - O monitor F5 procura checkpoint novo durante o treino e envia para Hugging Face apenas quando o arquivo novo esta estavel.
@@ -397,6 +397,7 @@ Com o pipeline crescendo para abranger a transição StyleTTS2 -> F5-TTS, integr
 3. **Erradicação da Raiz do ZeroDivisionError:** Adicionado limite físico `--min_seconds=0.8` no `prepare_styletts2_dataset.py`, deletando sumariamente da lista de treinamento arquivos picotados microscópicos que acabavam passando no Whisper, mas quebravam a validação matemática do StyleTTS2/F5-TTS.
 4. **Constantes e Escopo:** Na transição modular, corrigimos o problema de escopo agrupando as constantes de ambiente como `HF_HUB_COMPAT_PACKAGE` dentro do `utils.py`. Além disso, em 09/06/2026, resolvemos erros de importação e omissão de código (`NameError: restore_huggingface_subdir`, `NameError: install_f5_tts_dependencies` e `NameError: f5_dataset_vocab_rows`) restaurando definições ausentes, consolidando a lógica de sincronização do F5-TTS no módulo `f5_integration.py` e corrigindo as chamadas entre os módulos do `runner_utils`.
 5. **Checkpoint F5 sem corrida de I/O:** Em 09/06/2026, investigamos a queda `SIGBUS`/`OSError [Errno 5]` que acontecia logo apos `Sincronizando checkpoint ... model_last.pt`. A causa era o upload concorrente do `model_last.pt` vivo, que o F5 regrava no mesmo caminho, combinado com hardlink no pacote e temporarios multiprocessing do Kaggle em `/tmp`. O monitor agora segura um snapshot pendente, so envia o checkpoint anterior quando o seguinte ja existe e usa copia real na materializacao do pacote.
+6. **Separacao da base e da voz treinada:** Os checkpoints novos F5 nao sao salvos em `libraries/f5_tts_ptbr_tharyck`. O pacote remoto da voz passa a ser `voices/<inicial>_minha_voz_f5_tts_ptbr`, com a inicial do primeiro audio processado, para evitar misturar a base pre-treinada com checkpoints novos e facilitar localizacao no Hugging Face.
 
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE
 O ambiente do Colab e Kaggle **clona este repositório do GitHub**. 

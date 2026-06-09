@@ -37,10 +37,12 @@ A configuracao atual usa `tts_engine: "f5_tts_ptbr"`. Nesse modo, o runner:
 2. restaura `libraries/f5_tts_ptbr_tharyck` do Hugging Face ou baixa `Tharyck/multispeaker-ptbr-f5tts`;
 3. prepara o dataset no formato oficial do F5-TTS;
 4. roda fine-tuning usando o checkpoint PT-BR;
-5. exporta apenas os artefatos da voz neural para `minha_voz_f5_tts_ptbr`;
-6. envia o pacote da voz para `voices/minha_voz_f5_tts_ptbr`.
+5. exporta apenas os artefatos da voz neural para `<inicial>_minha_voz_f5_tts_ptbr`;
+6. envia o pacote da voz para `voices/<inicial>_minha_voz_f5_tts_ptbr`.
 
-A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote da voz em `voices/minha_voz_f5_tts_ptbr`.
+A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote da voz em `voices/<inicial>_minha_voz_f5_tts_ptbr`.
+
+Os checkpoints novos da voz nao sao gravados nem enviados para `libraries/f5_tts_ptbr_tharyck`. Essa pasta e somente a biblioteca/base pre-treinada restaurada no inicio. O pacote de voz ganha uma pasta separada que comeca pela inicial do primeiro audio `.wav` processado, por exemplo `voices/a_minha_voz_f5_tts_ptbr`, para facilitar localizar checkpoints novos e evitar misturar treino novo com a base.
 
 Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
 
@@ -629,4 +631,4 @@ OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
 
 O aviso do Hugging Face sobre `empty or missing yaml metadata in README.md` nao era a causa; era apenas validacao do card. O problema real era uma corrida de I/O: o F5 regrava `model_last.pt` no mesmo caminho, enquanto o monitor podia materializar e enviar esse checkpoint vivo durante o treino. Como o pacote podia usar hardlink para esse arquivo, o upload concorria com o trainer e com temporarios multiprocessing do Kaggle em `/tmp`.
 
-Correcao aplicada: o monitor F5 passou a criar um snapshot local do checkpoint estavel e so faz upload desse snapshot quando um checkpoint seguinte ja existe. Apos upload confirmado, o snapshot anterior e apagado e a retencao local mantem apenas o checkpoint atual. A materializacao do pacote F5 tambem passou a copiar o checkpoint real, sem hardlink para arquivo que o trainer ainda pode reabrir.
+Correcao aplicada: o monitor F5 passou a criar um snapshot local do checkpoint estavel e so faz upload desse snapshot quando um checkpoint seguinte ja existe. Apos upload confirmado, o snapshot anterior e apagado e a retencao local mantem apenas o checkpoint atual. A materializacao do pacote F5 tambem passou a copiar o checkpoint real, sem hardlink para arquivo que o trainer ainda pode reabrir. O destino remoto dos checkpoints novos e `voices/<inicial>_minha_voz_f5_tts_ptbr`, separado da biblioteca/base `libraries/f5_tts_ptbr_tharyck`.

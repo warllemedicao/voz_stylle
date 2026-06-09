@@ -347,3 +347,5 @@ E viavel criar um assistente proprio que conversa, responde perguntas do dia a d
 O erro `SIGBUS`/`OSError [Errno 5]` visto durante o upload de `model_last.pt` nao foi causado pelo dataset nem pelo aviso de metadata do Hugging Face. A causa foi concorrencia de I/O: o F5 regrava `model_last.pt` no mesmo caminho, enquanto o monitor podia enviar esse checkpoint vivo e o pacote podia apontar para ele por hardlink.
 
 O runner Kaggle agora trabalha em duas fases: cria snapshot do checkpoint estavel, espera aparecer um checkpoint seguinte, envia somente o snapshot anterior, apaga esse snapshot apos upload confirmado e mantem apenas o checkpoint atual no working. Isso preserva espaco no Kaggle e evita upload do arquivo ainda em uso pelo treino.
+
+Os checkpoints novos ficam em `voices/<inicial>_minha_voz_f5_tts_ptbr`, separados da biblioteca/base `libraries/f5_tts_ptbr_tharyck`. A inicial vem do primeiro audio `.wav` processado para facilitar localizar a pasta da voz treinada.
