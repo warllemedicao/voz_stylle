@@ -13,6 +13,34 @@ import importlib
 import importlib.metadata
 from pathlib import Path
 
+AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
+HF_HUB_COMPAT_PACKAGE = "huggingface_hub>=0.23.2,<1.0"
+ML_RUNTIME_MODULES = {
+    "torch": "torch",
+    "torchaudio": "torchaudio",
+    "torchvision": "torchvision",
+    "transformers": "transformers",
+    "accelerate": "accelerate",
+}
+
+RESEMBLE_COMPAT_PACKAGES = [
+    "numpy==1.26.2",
+    "scipy==1.11.4",
+    "pandas==2.1.3",
+    "matplotlib==3.8.1",
+    "tabulate==0.8.10",
+    "resampy==0.4.2",
+]
+
+RESEMBLE_COMPAT_VERSIONS = {
+    "numpy": "1.26.2",
+    "scipy": "1.11.4",
+    "pandas": "2.1.3",
+    "matplotlib": "3.8.1",
+    "tabulate": "0.8.10",
+    "resampy": "0.4.2",
+}
+
 def run(cmd, cwd=None, check=True, display_cmd=None):
     shown = display_cmd if display_cmd is not None else cmd
     print("\n$ " + " ".join(map(str, shown)))
