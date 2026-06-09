@@ -1,0 +1,8 @@
+# Arquivos compilados do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Outros arquivos indesejados comuns
+*.log
+.DS_Store
