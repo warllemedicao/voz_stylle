@@ -30,6 +30,12 @@ def count_f5_vocab_rows(vocab_path: Path) -> int:
     tokens = [line for line in vocab_path.read_text(encoding="utf-8").splitlines() if line]
     return len(tokens) + 1
 
+def f5_dataset_vocab_rows(f5_dataset_dir: Path) -> int | None:
+    vocab_path = f5_dataset_dir / "vocab.txt"
+    if not vocab_path.exists():
+        return None
+    return count_f5_vocab_rows(vocab_path)
+
 def validate_f5_library(library_dir: Path, f5_cfg: dict, *, strict: bool = False) -> bool:
     if not library_dir.exists() or not any(library_dir.iterdir()):
         if strict:

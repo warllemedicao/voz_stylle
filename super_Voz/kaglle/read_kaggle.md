@@ -235,19 +235,25 @@ Em 09/06/2026 foram corrigidos erros de execução no modo F5-TTS PT-BR.
 ```text
 NameError: name 'restore_huggingface_subdir' is not defined
 ```
-e
+,
 ```text
 NameError: name 'install_f5_tts_dependencies' is not defined
+```
+e
+```text
+NameError: name 'f5_dataset_vocab_rows' is not defined
 ```
 
 ### Causas
 1. A função `ensure_f5_tts_ptbr_library` no módulo `f5_integration.py` tentava chamar `restore_huggingface_subdir`, que estava definido no módulo `cloud_storage.py`, mas não havia sido importada. Além disso, existia duplicidade de lógica de sincronização F5 entre os dois módulos.
 2. A função `run_f5_tts_training` tentava chamar `install_f5_tts_dependencies` definida no módulo `environment.py`, mas a importação estava ausente.
+3. A função `f5_dataset_vocab_rows` foi chamada em `f5_integration.py` para calcular o tamanho do vocabulário do dataset, mas sua definição foi omitida ou perdida durante a refatoração modular.
 
 ### Correções aplicadas
 1. **Importação explícita:** O módulo `f5_integration.py` agora importa `restore_huggingface_subdir` e `upload_huggingface_subdir` do módulo `.cloud_storage`, e também `install_f5_tts_dependencies` do módulo `.environment`.
-2. **Consolidação de Lógica:** As funções `sync_f5_voice_checkpoint` e `start_f5_checkpoint_sync` foram movidas do módulo de armazenamento genérico (`cloud_storage.py`) para o módulo especializado (`f5_integration.py`).
-3. **Limpeza de redundância:** Removida a versão duplicada e incompleta de `materialize_f5_voice_package` que residia fora de seu módulo de origem.
+2. **Definição de função ausente:** A função `f5_dataset_vocab_rows` foi criada e implementada no módulo `f5_integration.py`, utilizando a lógica base de contagem presente em `count_f5_vocab_rows`.
+3. **Consolidação de Lógica:** As funções `sync_f5_voice_checkpoint` e `start_f5_checkpoint_sync` foram movidas do módulo de armazenamento genérico (`cloud_storage.py`) para o módulo especializado (`f5_integration.py`).
+4. **Limpeza de redundância:** Removida a versão duplicada e incompleta de `materialize_f5_voice_package` que residia fora de seu módulo de origem.
 
 Esta alteração garante a integridade do pipeline F5 no Kaggle e mantém a arquitetura modular limpa, com cada submódulo sendo responsável por seu próprio motor TTS.
 
