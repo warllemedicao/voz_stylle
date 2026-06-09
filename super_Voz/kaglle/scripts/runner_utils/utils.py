@@ -413,6 +413,13 @@ def replace_with_hardlink_or_copy(src: Path, dst: Path) -> None:
         shutil.copy2(src, temp)
     temp.replace(dst)
 
+def replace_with_copy(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    temp = dst.with_suffix(dst.suffix + ".tmp")
+    temp.unlink(missing_ok=True)
+    shutil.copy2(src, temp)
+    temp.replace(dst)
+
 def copy_if_exists(src: Path, dst: Path) -> bool:
     if not src.exists():
         return False
@@ -930,8 +937,8 @@ def materialize_f5_voice_package(
         path.mkdir(parents=True, exist_ok=True)
 
     if trained_checkpoint:
-        replace_with_hardlink_or_copy(trained_checkpoint, model_dir / trained_checkpoint.name)
-        replace_with_hardlink_or_copy(trained_checkpoint, model_dir / f"latest_checkpoint{trained_checkpoint.suffix}")
+        replace_with_copy(trained_checkpoint, model_dir / trained_checkpoint.name)
+        replace_with_copy(trained_checkpoint, model_dir / f"latest_checkpoint{trained_checkpoint.suffix}")
     replace_with_hardlink_or_copy(base_checkpoint, model_dir / f"base_checkpoint{base_checkpoint.suffix}")
     copy_if_exists(f5_dataset_dir / "vocab.txt", model_dir / "vocab.txt")
     copy_if_exists(f5_dataset_dir / "duration.json", docs_dir / "duration.json")
@@ -1111,4 +1118,3 @@ def patch_styletts2_zero_division_safety(style_dir: Path) -> None:
         print("✅ Patch contra ZeroDivisionError aplicado.")
     else:
         print("ℹ️ Patch contra ZeroDivisionError já aplicado ou não necessário.")
-

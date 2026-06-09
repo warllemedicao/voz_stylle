@@ -1,5 +1,11 @@
 # Registro de Alterações: limpeza_ia.py
 
+## [2026-06-09] Diagnostico de SIGBUS/OSError durante upload F5
+- O erro observado em `Epoch 3/20` com `subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>` e varios `OSError: [Errno 5] Input/output error: '/tmp/pymp-*'` ocorreu apos o inicio do upload de `model_last.pt`.
+- A limpeza/transcricao ja havia terminado; portanto a causa nao estava em `limpeza_ia.py`, no dataset nem no aviso de metadata do Hugging Face.
+- A causa operacional era concorrencia de I/O no treino F5: `model_last.pt` e regravado no mesmo caminho, e o monitor podia enviar/materializar esse checkpoint vivo por hardlink enquanto o `accelerate` ainda usava multiprocessing em `/tmp`.
+- Correcao no runner: materializacao F5 por copia real, snapshot pendente do checkpoint estavel, upload somente quando um checkpoint seguinte ja existe, remocao do snapshot enviado e retencao local do checkpoint atual.
+
 ## [2026-06-08] Falha obrigatoria em dependencia essencial
 - Politica nova: biblioteca usada pelo fluxo ativo nao pode falhar silenciosamente nem virar fallback permanente.
 - `scripts/run_kaggle_styletts2.py` agora aborta quando falha a instalacao de pacotes Python essenciais, pacotes de sistema de audio (`ffmpeg`, `sox`, `espeak-ng`) ou quando a verificacao pos-instalacao nao encontra os modulos esperados.

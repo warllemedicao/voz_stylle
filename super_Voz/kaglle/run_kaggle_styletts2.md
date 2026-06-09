@@ -68,7 +68,7 @@ f5_tts_ptbr:
   tokenizer: "char"
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30
-  local_checkpoint_keep_last: 2
+  local_checkpoint_keep_last: 1
   keepalive_interval_seconds: 120
 ```
 
@@ -92,11 +92,25 @@ O mesmo vale para a limpeza: instalar os pins do Resemble (`numpy==1.26.2`, `sci
 
 Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote `voices/minha_voz_f5_tts_ptbr`.
 
-Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, o pacote parcial da voz e materializado e enviado para `voices/minha_voz_f5_tts_ptbr`. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
+Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, ele cria um snapshot local pendente. O upload durante o treino acontece somente quando um checkpoint mais novo ja existe: nesse momento o runner envia o snapshot anterior para `voices/minha_voz_f5_tts_ptbr`, remove o snapshot enviado e deixa o checkpoint atual no working. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
 
 Se o processo de treino falhar depois de algum checkpoint local existir, o runner ainda tenta sincronizar o ultimo checkpoint antes de encerrar. Se o monitor ja tiver enviado exatamente esse checkpoint, o upload final duplicado e pulado.
 
-Apos upload confirmado de checkpoint F5, a retencao local remove checkpoints antigos e mantem apenas os `local_checkpoint_keep_last` mais recentes, por padrao 2. Isso evita acumulo de checkpoints no `/kaggle/working`.
+Apos upload confirmado de checkpoint F5 anterior, a retencao local remove checkpoints antigos e mantem apenas os `local_checkpoint_keep_last` mais recentes, por padrao 1. Isso evita acumulo de checkpoints no `/kaggle/working` sem apagar o checkpoint atual que o treino ainda pode usar.
+
+## Diagnostico do erro SIGBUS/OSError no F5
+
+Em 09/06/2026 foi analisado o erro em que o treino caiu em `Epoch 3/20`, logo apos:
+
+```text
+[F5-TTS-PT-BR] Sincronizando checkpoint (checkpoint novo durante treino): model_last.pt
+subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>
+OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
+```
+
+O aviso `empty or missing yaml metadata in README.md` do Hugging Face era apenas validacao do repo card. A causa operacional era a concorrencia entre o monitor F5 e o trainer: o arquivo `model_last.pt` e regravado no mesmo caminho durante o treino, o pacote usava hardlink/copia desse arquivo vivo e o upload podia ler o mesmo checkpoint enquanto o `accelerate` ainda mantinha processos temporarios em `/tmp`. Isso aumentava a chance de falha de I/O/SIGBUS no Kaggle.
+
+Correcao aplicada: o pacote F5 agora copia checkpoints com arquivo temporario real, sem hardlink para o checkpoint vivo; o monitor guarda o primeiro checkpoint como snapshot pendente; so envia esse snapshot quando o checkpoint seguinte ja existe e esta estavel; depois do upload confirmado, apaga o snapshot anterior e mantem apenas o checkpoint atual no working. No encerramento, o ultimo checkpoint ainda e enviado como sincronizacao final.
 
 ## Entrada de audios
 

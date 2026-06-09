@@ -385,6 +385,7 @@ Para confirmar, o trecho mais importante do log é o final de `Models/super_Voz/
 - [x] Salvamento de checkpoint a cada epoca (`save_freq: 1`).
 - [x] Persistência do pacote completo da voz em Hugging Face Bucket.
 - [x] Retenção do checkpoint mais recente local e remoção apenas dos anteriores após upload confirmado de checkpoint mais novo.
+- [x] Upload F5 em duas fases: snapshot do checkpoint estavel, upload apenas quando um checkpoint seguinte ja existe, e limpeza do snapshot anterior apos confirmacao.
 
 ## Refatoração Modular e Estabilidade do Pipeline Kaggle (09/06/2026)
 
@@ -395,6 +396,7 @@ Com o pipeline crescendo para abranger a transição StyleTTS2 -> F5-TTS, integr
 2. **Refatoração Modular:** O arquivo `run_kaggle_styletts2.py` foi decomposto usando módulos injetados em `scripts/runner_utils/` (`cloud_storage.py`, `environment.py`, `f5_integration.py`, `utils.py`), tornando a manutenção mais segura e ágil.
 3. **Erradicação da Raiz do ZeroDivisionError:** Adicionado limite físico `--min_seconds=0.8` no `prepare_styletts2_dataset.py`, deletando sumariamente da lista de treinamento arquivos picotados microscópicos que acabavam passando no Whisper, mas quebravam a validação matemática do StyleTTS2/F5-TTS.
 4. **Constantes e Escopo:** Na transição modular, corrigimos o problema de escopo agrupando as constantes de ambiente como `HF_HUB_COMPAT_PACKAGE` dentro do `utils.py`. Além disso, em 09/06/2026, resolvemos erros de importação e omissão de código (`NameError: restore_huggingface_subdir`, `NameError: install_f5_tts_dependencies` e `NameError: f5_dataset_vocab_rows`) restaurando definições ausentes, consolidando a lógica de sincronização do F5-TTS no módulo `f5_integration.py` e corrigindo as chamadas entre os módulos do `runner_utils`.
+5. **Checkpoint F5 sem corrida de I/O:** Em 09/06/2026, investigamos a queda `SIGBUS`/`OSError [Errno 5]` que acontecia logo apos `Sincronizando checkpoint ... model_last.pt`. A causa era o upload concorrente do `model_last.pt` vivo, que o F5 regrava no mesmo caminho, combinado com hardlink no pacote e temporarios multiprocessing do Kaggle em `/tmp`. O monitor agora segura um snapshot pendente, so envia o checkpoint anterior quando o seguinte ja existe e usa copia real na materializacao do pacote.
 
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE
 O ambiente do Colab e Kaggle **clona este repositório do GitHub**. 

@@ -385,6 +385,27 @@ def prune_f5_uploaded_checkpoints(checkpoint_dir: Path, keep_last: int = 2) -> t
         print(f"[DISCO][F5] Retencao local manteve os {keep_last} checkpoint(s) mais recentes e recuperou {format_bytes(recovered)}.")
     return removed, recovered
 
+def f5_pending_upload_dir(package_dir: Path) -> Path:
+    return package_dir.parent / f".{package_dir.name}_pending_upload"
+
+def snapshot_f5_checkpoint(checkpoint: Path, package_dir: Path) -> Path:
+    pending_dir = f5_pending_upload_dir(package_dir)
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    snapshot = pending_dir / checkpoint.name
+    replace_with_copy(checkpoint, snapshot)
+    print(f"[F5-TTS-PT-BR] Snapshot local aguardando proximo checkpoint: {snapshot.name}")
+    return snapshot
+
+def remove_f5_pending_snapshot(snapshot: Path | None) -> None:
+    if not snapshot:
+        return
+    try:
+        snapshot.unlink(missing_ok=True)
+        if snapshot.parent.exists() and not any(snapshot.parent.iterdir()):
+            snapshot.parent.rmdir()
+    except Exception as exc:
+        print(f"[F5-TTS-PT-BR][AVISO] Nao foi possivel remover snapshot pendente {snapshot}: {exc}")
+
 def f5_checkpoint_state(path: Path | None) -> tuple[str, int, int] | None:
     if not path or not path.exists():
         return None
@@ -474,7 +495,7 @@ def run_f5_tts_training(
     sync_stop = None
     sync_thread = None
     training_error: Exception | None = None
-    keep_last_checkpoints = max(1, int(f5_cfg.get("local_checkpoint_keep_last", 2)))
+    keep_last_checkpoints = max(1, int(f5_cfg.get("local_checkpoint_keep_last", 1)))
     try:
         sync_stop, sync_thread = start_f5_checkpoint_sync(
             hf_cfg,
@@ -517,19 +538,29 @@ def run_f5_tts_training(
     final_state = f5_checkpoint_state(trained_checkpoint)
     if final_state == f5_cfg.get("_last_uploaded_checkpoint"):
         print("[F5-TTS-PT-BR] Ultimo checkpoint ja sincronizado; upload final duplicado pulado.")
-    elif sync_f5_voice_checkpoint(
-        hf_cfg,
-        package_dir,
-        f5_cfg,
-        f5_library_dir,
-        f5_dataset_dir,
-        processed_dir,
-        base_checkpoint,
-        trained_checkpoint,
-        reason="sincronizacao final",
-    ):
-        f5_cfg["_last_uploaded_checkpoint"] = final_state
-        prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
+    else:
+        final_upload_checkpoint = trained_checkpoint
+        pending_snapshot = f5_cfg.get("_pending_upload_snapshot")
+        pending_state = f5_cfg.get("_pending_upload_state")
+        if pending_snapshot and pending_state == final_state and Path(pending_snapshot).exists():
+            final_upload_checkpoint = Path(pending_snapshot)
+        else:
+            final_upload_checkpoint = snapshot_f5_checkpoint(trained_checkpoint, package_dir)
+
+        if sync_f5_voice_checkpoint(
+            hf_cfg,
+            package_dir,
+            f5_cfg,
+            f5_library_dir,
+            f5_dataset_dir,
+            processed_dir,
+            base_checkpoint,
+            final_upload_checkpoint,
+            reason="sincronizacao final",
+        ):
+            f5_cfg["_last_uploaded_checkpoint"] = final_state
+            remove_f5_pending_snapshot(final_upload_checkpoint)
+            prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
     print(f"[F5-TTS-PT-BR] Pacote da voz neural pronto em: {package_dir}")
     if training_error:
         raise training_error
@@ -578,28 +609,52 @@ def start_f5_checkpoint_sync(
 
     def worker() -> None:
         last_uploaded = f5_cfg.get("_last_uploaded_checkpoint")
+        initial_checkpoint = latest_f5_checkpoint(checkpoint_dir)
+        last_seen = f5_cfg.get("_last_seen_checkpoint") or f5_checkpoint_state(initial_checkpoint)
+        if last_seen:
+            f5_cfg["_last_seen_checkpoint"] = last_seen
+        pending_state = f5_cfg.get("_pending_upload_state")
+        pending_snapshot = Path(f5_cfg["_pending_upload_snapshot"]) if f5_cfg.get("_pending_upload_snapshot") else None
         while not stop_event.wait(poll_interval_seconds):
             try:
                 latest = latest_f5_checkpoint(checkpoint_dir)
                 current_state = f5_checkpoint_state(latest)
-                if not latest or not current_state or current_state == last_uploaded:
+                if not latest or not current_state or current_state == last_seen:
                     continue
                 if not is_stable_file(latest, min_age_seconds=stable_seconds):
                     continue
-                if sync_f5_voice_checkpoint(
-                    hf_cfg,
-                    package_dir,
-                    f5_cfg,
-                    f5_library_dir,
-                    f5_dataset_dir,
-                    processed_dir,
-                    base_checkpoint,
-                    latest,
-                    reason="checkpoint novo durante treino",
-                ):
-                    last_uploaded = current_state
-                    f5_cfg["_last_uploaded_checkpoint"] = current_state
-                    prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
+
+                if pending_snapshot and pending_state and pending_state != last_uploaded:
+                    if not pending_snapshot.exists():
+                        print("[F5-TTS-PT-BR][AVISO] Snapshot pendente sumiu; criando novo snapshot do checkpoint atual.")
+                    elif sync_f5_voice_checkpoint(
+                        hf_cfg,
+                        package_dir,
+                        f5_cfg,
+                        f5_library_dir,
+                        f5_dataset_dir,
+                        processed_dir,
+                        base_checkpoint,
+                        pending_snapshot,
+                        reason=f"checkpoint anterior confirmado por novo checkpoint: {latest.name}",
+                    ):
+                        last_uploaded = pending_state
+                        f5_cfg["_last_uploaded_checkpoint"] = pending_state
+                        remove_f5_pending_snapshot(pending_snapshot)
+                        pending_snapshot = None
+                        pending_state = None
+                        f5_cfg.pop("_pending_upload_snapshot", None)
+                        f5_cfg.pop("_pending_upload_state", None)
+                        prune_f5_uploaded_checkpoints(checkpoint_dir, keep_last=keep_last_checkpoints)
+                    else:
+                        continue
+
+                pending_snapshot = snapshot_f5_checkpoint(latest, package_dir)
+                pending_state = current_state
+                last_seen = current_state
+                f5_cfg["_pending_upload_snapshot"] = str(pending_snapshot)
+                f5_cfg["_pending_upload_state"] = pending_state
+                f5_cfg["_last_seen_checkpoint"] = current_state
             except Exception as exc:
                 print(f"[F5-TTS-PT-BR][AVISO] Falha no monitor de checkpoint: {exc}")
 
@@ -607,7 +662,8 @@ def start_f5_checkpoint_sync(
     thread.start()
     print(
         "[F5-TTS-PT-BR] Monitor de checkpoints ativo; "
-        f"checagem a cada {poll_interval_seconds}s e upload somente para checkpoint novo estavel."
+        f"checagem a cada {poll_interval_seconds}s; upload durante treino somente do checkpoint anterior "
+        "quando um novo checkpoint estavel ja existe."
     )
     return stop_event, thread
 
@@ -653,4 +709,3 @@ def save_f5_trainer_checkpoint(checkpoint: dict, destination: Path) -> None:
         torch.save(checkpoint, destination, _use_new_zipfile_serialization=False)
     except TypeError:
         torch.save(checkpoint, destination)
-

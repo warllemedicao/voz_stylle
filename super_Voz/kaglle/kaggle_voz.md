@@ -616,3 +616,17 @@ Correcao aplicada:
 - Em GPUs mais novas, o runner continua deixando `torch` e `transformers` sem pin rigido.
 
 Se o erro continuar no Kaggle, limpe o runtime ou force reinstalacao para garantir que uma versao recente demais de `transformers` nao ficou carregada na sessao antiga.
+
+## Correcao do SIGBUS/OSError durante upload F5
+
+Em 09/06/2026 foi analisada a falha em `Epoch 3/20` logo apos o log:
+
+```text
+[F5-TTS-PT-BR] Sincronizando checkpoint (checkpoint novo durante treino): model_last.pt
+subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>
+OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
+```
+
+O aviso do Hugging Face sobre `empty or missing yaml metadata in README.md` nao era a causa; era apenas validacao do card. O problema real era uma corrida de I/O: o F5 regrava `model_last.pt` no mesmo caminho, enquanto o monitor podia materializar e enviar esse checkpoint vivo durante o treino. Como o pacote podia usar hardlink para esse arquivo, o upload concorria com o trainer e com temporarios multiprocessing do Kaggle em `/tmp`.
+
+Correcao aplicada: o monitor F5 passou a criar um snapshot local do checkpoint estavel e so faz upload desse snapshot quando um checkpoint seguinte ja existe. Apos upload confirmado, o snapshot anterior e apagado e a retencao local mantem apenas o checkpoint atual. A materializacao do pacote F5 tambem passou a copiar o checkpoint real, sem hardlink para arquivo que o trainer ainda pode reabrir.

@@ -67,7 +67,7 @@ f5_tts_ptbr:
   save_per_updates: 500
   last_per_updates: 100
   keep_last_n_checkpoints: 2
-  local_checkpoint_keep_last: 2
+  local_checkpoint_keep_last: 1
   mixed_precision: "fp16"
   checkpoint_sync_interval_seconds: 300
   checkpoint_stable_seconds: 30

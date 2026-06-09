@@ -341,3 +341,9 @@ Backend local
 Conclusao:
 
 E viavel criar um assistente proprio que conversa, responde perguntas do dia a dia e controla a casa usando Home Assistant, Gemini e a voz neural treinada. O caminho mais realista nao e substituir Alexa/Google, mas construir uma camada propria por cima do Home Assistant e usar sua voz neural como motor TTS.
+
+## Historico Kaggle F5 09/06/2026
+
+O erro `SIGBUS`/`OSError [Errno 5]` visto durante o upload de `model_last.pt` nao foi causado pelo dataset nem pelo aviso de metadata do Hugging Face. A causa foi concorrencia de I/O: o F5 regrava `model_last.pt` no mesmo caminho, enquanto o monitor podia enviar esse checkpoint vivo e o pacote podia apontar para ele por hardlink.
+
+O runner Kaggle agora trabalha em duas fases: cria snapshot do checkpoint estavel, espera aparecer um checkpoint seguinte, envia somente o snapshot anterior, apaga esse snapshot apos upload confirmado e mantem apenas o checkpoint atual no working. Isso preserva espaco no Kaggle e evita upload do arquivo ainda em uso pelo treino.

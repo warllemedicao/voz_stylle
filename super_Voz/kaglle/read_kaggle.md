@@ -443,12 +443,26 @@ O runner tenta restaurar automaticamente de caminhos como:
 
 No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base LibriTTS em ingles. Ele restaura/baixa a biblioteca `libraries/f5_tts_ptbr_tharyck`, faz o fine-tuning F5-TTS PT-BR e exporta a voz para `voices/minha_voz_f5_tts_ptbr`. A inferencia deve acontecer em outro programa que carregue esses artefatos.
 
-O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, envia para Hugging Face apenas quando encontra checkpoint novo e estavel, e pula uploads quando nada mudou. O log tambem recebe mensagens de keep-alive durante o `accelerate` para manter a execucao visivel no Kaggle.
+O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, cria snapshot local quando encontra checkpoint novo e estavel, e so envia para Hugging Face o snapshot anterior quando um checkpoint seguinte ja existe. O log tambem recebe mensagens de keep-alive durante o `accelerate` para manter a execucao visivel no Kaggle.
 
-Durante o treino, o runner nao apaga mais o checkpoint que acabou de enviar. Ele mantem o checkpoint
-mais recente em `Models/super_Voz` e remove apenas checkpoints anteriores quando um checkpoint mais
-novo ja foi enviado com sucesso. Isso evita que o config aponte para um arquivo removido no meio da
-retomada.
+Durante o treino, o runner nao envia nem apaga o checkpoint vivo que acabou de ser escrito. Ele mantem
+o checkpoint mais recente no working, envia o snapshot anterior quando um checkpoint mais novo ja
+existe, remove o snapshot enviado e conserva apenas o checkpoint atual para nao sobrecarregar o
+Kaggle.
+
+### Historico 09/06/2026: SIGBUS/OSError no upload F5
+
+O erro observado em `Epoch 3/20` ocorreu logo depois de:
+
+```text
+[F5-TTS-PT-BR] Sincronizando checkpoint (checkpoint novo durante treino): model_last.pt
+subprocess.CalledProcessError ... died with <Signals.SIGBUS: 7>
+OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
+```
+
+O aviso `empty or missing yaml metadata in README.md` do Hugging Face era inofensivo. A falha vinha da concorrencia entre upload e treino: `model_last.pt` e regravado no mesmo caminho pelo F5, e o pacote podia hardlinkar esse arquivo enquanto o upload lia os dados e o `accelerate` ainda mantinha multiprocessing em `/tmp`.
+
+Correcao: materializacao F5 por copia real, snapshot pendente fora do pacote, upload apenas do checkpoint anterior quando o proximo checkpoint estavel ja existe, limpeza do snapshot enviado e retencao local padrao de 1 checkpoint atual.
 
 ## Se der erro
 
