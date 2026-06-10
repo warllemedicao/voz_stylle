@@ -445,7 +445,7 @@ No modo atual `tts_engine: "f5_tts_ptbr"`, o runner nao usa o checkpoint base Li
 
 Os checkpoints novos da voz nao entram em `libraries/f5_tts_ptbr_tharyck`. Essa pasta e verificada/restaurada no inicio apenas como base pre-treinada. Para facilitar localizacao, a pasta de checkpoints novos comeca pela inicial do primeiro audio `.wav` processado, por exemplo `voices/a_minha_voz_f5_tts_ptbr`.
 
-O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, cria snapshot local quando encontra checkpoint novo e estavel, e so envia para Hugging Face o snapshot anterior quando um checkpoint seguinte ja existe. O log tambem recebe mensagens de keep-alive durante o `accelerate` para manter a execucao visivel no Kaggle.
+O treino F5 tem monitor de checkpoint: a checagem roda periodicamente, cria snapshot local quando encontra checkpoint novo e estavel, e so envia para Hugging Face o snapshot anterior quando um checkpoint seguinte ja existe. O notebook agora tambem inicia um watchdog de atividade a cada 90 segundos, com heartbeat na saida da celula e eventos leves no frontend do Kaggle quando JavaScript esta disponivel. O log do runner continua recebendo mensagens de keep-alive durante o `accelerate`.
 
 Durante o treino, o runner nao envia nem apaga o checkpoint vivo que acabou de ser escrito. Ele mantem
 o checkpoint mais recente no working, envia o snapshot anterior quando um checkpoint mais novo ja

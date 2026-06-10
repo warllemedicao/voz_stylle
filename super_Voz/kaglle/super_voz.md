@@ -176,6 +176,7 @@ O modo atual do Kaggle passou a usar `tts_engine: "f5_tts_ptbr"` para evitar ini
 - Quando `use_base_vocab: true`, o runner copia o `vocab.txt` da biblioteca base para o dataset F5 depois de `prepare_csv_wavs.py`, mantendo as 2546 linhas do embedding textual (`len(vocab) + 1`) em vez de reduzir a camada para o vocabulario pequeno da voz.
 - Quando o checkpoint base PT-BR vem como `.safetensors` de pesos crus (`transformer.*`), o runner cria um checkpoint temporario em formato EMA (`ema_model.transformer.*`) antes do fine-tuning e remove caches `pretrained_*` antigos que poderiam ser escolhidos pelo trainer. Se o embedding de texto do checkpoint divergir do vocabulario ativo, o runner ajusta `ema_model.transformer.text_embed.text_embed.weight` para `len(vocab.txt) + 1` linhas durante a conversao.
 - O monitor F5 procura checkpoint novo durante o treino e envia para Hugging Face apenas quando o arquivo novo esta estavel.
+- O notebook Kaggle inicia um watchdog de atividade a cada 90 segundos, atualizando a saida da celula e simulando atividade leve no frontend quando JavaScript esta disponivel.
 - O runner imprime keep-alive periodico no log do Kaggle durante o `accelerate`.
 - Se o treino F5 falhar depois de gerar checkpoint local, o runner tenta sincronizar o ultimo checkpoint antes de encerrar.
 

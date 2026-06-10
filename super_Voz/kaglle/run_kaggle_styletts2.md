@@ -47,6 +47,12 @@ cloudflare_r2:
 
 A config Kaggle ja vem apontando para o R2 de leitura do projeto. Se quiser sobrescrever sem editar o Git, crie Kaggle Secrets com `R2_ENDPOINT_URL`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` e `R2_RAW_AUDIO_PREFIX`. A config runtime do notebook bloqueia apenas upload/sync para R2.
 
+## Atividade do notebook Kaggle
+
+O notebook `run_kaggle_styletts2.ipynb` inicia `start_kaggle_activity_watchdog(interval_seconds=90)` antes de abrir o subprocesso do pipeline. Esse watchdog mantem a saida da celula em movimento com mensagens periodicas `[KAGGLE][ATIVIDADE]` e, quando `IPython.display.Javascript` esta disponivel, injeta um pequeno timer no frontend do Kaggle que dispara eventos leves de `mousemove` e `focus`.
+
+Essa camada complementa o keep-alive do runner. Ela reduz o risco de o notebook interativo parecer ocioso enquanto o treino fica muito tempo sem logs, mas nao substitui limites do Kaggle como tempo maximo de sessao, preempcao de GPU ou execucao por commit. Para treino longo, continue usando **Save Version -> Save & Run All (Commit)** quando quiser deixar o processo rodando com o navegador fechado.
+
 ## Biblioteca F5-TTS PT-BR
 
 O pipeline separa a biblioteca/base F5-TTS PT-BR dos checkpoints da voz neural. A config usa:
@@ -100,7 +106,7 @@ O mesmo vale para a limpeza: instalar os pins do Resemble (`numpy==1.26.2`, `sci
 
 Este projeto nao executa inferencia texto-para-audio. Ele gera e persiste os arquivos da voz neural; outro programa deve carregar o runtime F5-TTS, a biblioteca/base `libraries/f5_tts_ptbr_tharyck` e o pacote `voices/<inicial>_minha_voz_f5_tts_ptbr`.
 
-Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, ele cria um snapshot local pendente. O upload durante o treino acontece somente quando um checkpoint mais novo ja existe: nesse momento o runner envia o snapshot anterior para `voices/<inicial>_minha_voz_f5_tts_ptbr`, remove o snapshot enviado e deixa o checkpoint atual no working. Sem checkpoint novo, nao ha upload. Um keep-alive imprime status a cada `keepalive_interval_seconds` para manter o notebook ativo/visivel durante treinos longos.
+Durante o fine-tuning F5, o runner inicia um monitor de checkpoints. A cada `checkpoint_sync_interval_seconds`, ele procura o checkpoint mais recente em `ckpts/super_voz_f5_ptbr`; se o arquivo for novo e estiver estavel por `checkpoint_stable_seconds`, ele cria um snapshot local pendente. O upload durante o treino acontece somente quando um checkpoint mais novo ja existe: nesse momento o runner envia o snapshot anterior para `voices/<inicial>_minha_voz_f5_tts_ptbr`, remove o snapshot enviado e deixa o checkpoint atual no working. Sem checkpoint novo, nao ha upload. O runner imprime status a cada `keepalive_interval_seconds`, enquanto o notebook tambem mantem um watchdog de atividade a cada 90 segundos.
 
 Se o processo de treino falhar depois de algum checkpoint local existir, o runner ainda tenta sincronizar o ultimo checkpoint antes de encerrar. Se o monitor ja tiver enviado exatamente esse checkpoint, o upload final duplicado e pulado.
 

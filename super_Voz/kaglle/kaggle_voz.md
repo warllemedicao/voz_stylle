@@ -44,7 +44,7 @@ A inferencia nao faz parte deste projeto. Outro programa deve carregar o runtime
 
 Os checkpoints novos da voz nao sao gravados nem enviados para `libraries/f5_tts_ptbr_tharyck`. Essa pasta e somente a biblioteca/base pre-treinada restaurada no inicio. O pacote de voz ganha uma pasta separada que comeca pela inicial do primeiro audio `.wav` processado, por exemplo `voices/a_minha_voz_f5_tts_ptbr`, para facilitar localizar checkpoints novos e evitar misturar treino novo com a base.
 
-Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. O runner tambem imprime keep-alive no log para reduzir risco de a execucao parecer parada em treinos longos. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
+Durante o treino F5, um monitor procura checkpoints novos periodicamente. O upload para Hugging Face ocorre somente quando aparece checkpoint novo e estavel; sem checkpoint novo, a checagem nao envia nada. Para reduzir paradas por aparente inatividade, existem duas camadas de atividade: o notebook inicia um watchdog que atualiza a saida a cada 90 segundos e injeta um evento leve de atividade no frontend do Kaggle; o runner tambem imprime keep-alive no log durante o `accelerate`. Se o treino falhar apos gerar checkpoint, ele tenta sincronizar o ultimo checkpoint antes de sair.
 
 ## Investigacao de modelo F5 com vocabulario/tokenizer publicado
 
