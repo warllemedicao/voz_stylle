@@ -632,3 +632,13 @@ OSError: [Errno 5] Input/output error: '/tmp/pymp-*'
 O aviso do Hugging Face sobre `empty or missing yaml metadata in README.md` nao era a causa; era apenas validacao do card. O problema real era uma corrida de I/O: o F5 regrava `model_last.pt` no mesmo caminho, enquanto o monitor podia materializar e enviar esse checkpoint vivo durante o treino. Como o pacote podia usar hardlink para esse arquivo, o upload concorria com o trainer e com temporarios multiprocessing do Kaggle em `/tmp`.
 
 Correcao aplicada: o monitor F5 passou a criar um snapshot local do checkpoint estavel e so faz upload desse snapshot quando um checkpoint seguinte ja existe. Apos upload confirmado, o snapshot anterior e apagado e a retencao local mantem apenas o checkpoint atual. A materializacao do pacote F5 tambem passou a copiar o checkpoint real, sem hardlink para arquivo que o trainer ainda pode reabrir. O destino remoto dos checkpoints novos e `voices/<inicial>_minha_voz_f5_tts_ptbr`, separado da biblioteca/base `libraries/f5_tts_ptbr_tharyck`.
+
+## Ajuste para parada silenciosa no update 5500
+
+Em 10/06/2026 foi observada uma parada do Kaggle sem traceback em `Epoch 11/20`, logo apos `update=5500`. O loss ainda estava normal, entao a evidencia aponta para encerramento externo do runtime durante escrita de checkpoint, nao para falha do dataset ou do vocabulario. O ponto `5500` coincidia com `last_per_updates=500`, que fazia o F5 regravar `model_last.pt` com frequencia alta.
+
+Medidas aplicadas no perfil Kaggle:
+
+- `save_per_updates: 2000` e `last_per_updates: 2000`, reduzindo regravacoes de checkpoint.
+- `checkpoint_sync_interval_seconds: 600` e `checkpoint_stable_seconds: 60`, dando mais tempo para checkpoints grandes estabilizarem.
+- `batch_size_per_gpu: 1200` e `max_samples: 24`, reduzindo pressao de memoria e chance de morte silenciosa do kernel.

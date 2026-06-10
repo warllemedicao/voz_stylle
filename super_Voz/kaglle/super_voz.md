@@ -234,7 +234,7 @@ hf://buckets/warllem/Super_voz
 - O pacote mantém `model/latest_checkpoint.pth` para retomada e `model/best_model.pth` para o melhor modelo conhecido.
 - O Hugging Face é obrigatório na configuração Kaggle: sem `HF_TOKEN` ou sem backend de upload funcional, o treino aborta antes de gerar checkpoints locais.
 - Falha ao restaurar pacote remoto nao aborta sozinha; o primeiro upload real ocorre no primeiro checkpoint de epoca.
-- O runner checa checkpoints novos a cada 300 segundos por padrao e só faz upload quando encontra um checkpoint novo, valido e estavel.
+- O runner checa checkpoints novos a cada 600 segundos por padrao e só faz upload quando encontra um checkpoint novo, valido e estavel.
 - Se o treino falhar, o bloco final sincroniza o pacote para recuperação, mas a mensagem final informa falha/interrupção em vez de `TREINO FINALIZADO`.
 - `Audios_brutos` e `Audios_processados` são removidos depois que o dataset final e o pacote forem criados.
 - O dataset preparado de uma execução anterior e os WAVs antigos do pacote são removidos antes de gerar a versão atual.
@@ -399,6 +399,7 @@ Com o pipeline crescendo para abranger a transição StyleTTS2 -> F5-TTS, integr
 4. **Constantes e Escopo:** Na transição modular, corrigimos o problema de escopo agrupando as constantes de ambiente como `HF_HUB_COMPAT_PACKAGE` dentro do `utils.py`. Além disso, em 09/06/2026, resolvemos erros de importação e omissão de código (`NameError: restore_huggingface_subdir`, `NameError: install_f5_tts_dependencies` e `NameError: f5_dataset_vocab_rows`) restaurando definições ausentes, consolidando a lógica de sincronização do F5-TTS no módulo `f5_integration.py` e corrigindo as chamadas entre os módulos do `runner_utils`.
 5. **Checkpoint F5 sem corrida de I/O:** Em 09/06/2026, investigamos a queda `SIGBUS`/`OSError [Errno 5]` que acontecia logo apos `Sincronizando checkpoint ... model_last.pt`. A causa era o upload concorrente do `model_last.pt` vivo, que o F5 regrava no mesmo caminho, combinado com hardlink no pacote e temporarios multiprocessing do Kaggle em `/tmp`. O monitor agora segura um snapshot pendente, so envia o checkpoint anterior quando o seguinte ja existe e usa copia real na materializacao do pacote.
 6. **Separacao da base e da voz treinada:** Os checkpoints novos F5 nao sao salvos em `libraries/f5_tts_ptbr_tharyck`. O pacote remoto da voz passa a ser `voices/<inicial>_minha_voz_f5_tts_ptbr`, com a inicial do primeiro audio processado, para evitar misturar a base pre-treinada com checkpoints novos e facilitar localizacao no Hugging Face.
+7. **Cadencia conservadora no Kaggle:** Em 10/06/2026, apos parada silenciosa em `Epoch 11/20` logo depois de `update=5500`, a configuracao F5 passou para `save_per_updates=2000`, `last_per_updates=2000`, `checkpoint_sync_interval_seconds=600`, `checkpoint_stable_seconds=60`, `batch_size_per_gpu=1200` e `max_samples=24`. O objetivo e reduzir I/O de checkpoint, pressao de memoria e chance de o Kaggle encerrar o kernel sem traceback.
 
 ## ⚠️ AVISO IMPORTANTE SOBRE COLAB/KAGGLE
 O ambiente do Colab e Kaggle **clona este repositório do GitHub**. 

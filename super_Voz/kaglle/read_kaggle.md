@@ -486,9 +486,17 @@ Atuacao aplicada para reduzir reincidencia:
 - Antes do `accelerate launch`, o runner configura temporarios/cache em `/kaggle/working/super_voz_runtime_tmp` e `/kaggle/working/super_voz_runtime_cache`.
 - O ambiente herdado pelo treino passa a preferir essas pastas para `TMPDIR`, `TEMP`, `TMP`, `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, `HF_HOME`, `TORCH_HOME` e `XDG_CACHE_HOME`.
 - W&B fica desabilitado por padrao no F5 (`disable_wandb: true`), removendo a criacao de `wandb-media` e `wandb-artifacts` em `/tmp`.
-- A configuracao F5 agora reduz a frequencia de checkpoint: `save_per_updates: 1000`, `last_per_updates: 500`, `keep_last_n_checkpoints: 1`.
+- A configuracao F5 agora reduz a frequencia de checkpoint: `save_per_updates: 2000`, `last_per_updates: 2000`, `keep_last_n_checkpoints: 1`.
 
-Se ainda ocorrer `SIGBUS` nesse ponto, o proximo ajuste conservador e aumentar `save_per_updates`/`last_per_updates` para `2000` ou baixar `batch_size_per_gpu`/`max_samples`, mas a primeira suspeita deve continuar sendo I/O do runtime, nao vocabulario/checkpoint base.
+### Historico 10/06/2026: parada silenciosa no update 5500
+
+O Kaggle parou sem alarme em `Epoch 11/20`, logo apos `update=5500`, sem `Traceback` no trecho final. Como `5500` e multiplo da configuracao antiga `last_per_updates=500`, a suspeita principal continua sendo I/O do runtime durante a regravacao de `model_last.pt`, agora sem mensagem Python visivel porque o processo/kernel pode ser encerrado externamente.
+
+Atuacao aplicada:
+
+- `save_per_updates` e `last_per_updates` foram elevados para `2000`, evitando regravacoes de checkpoint em updates intermediarios como `5500`.
+- `checkpoint_sync_interval_seconds` passou para `600` e `checkpoint_stable_seconds` para `60`, reduzindo checagens e esperando arquivos grandes estabilizarem por mais tempo.
+- `batch_size_per_gpu` foi reduzido para `1200` e `max_samples` para `24`, diminuindo pressao de VRAM/RAM alem da pressao de I/O.
 
 ## Se der erro
 

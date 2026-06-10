@@ -72,14 +72,16 @@ f5_tts_ptbr:
   expected_vocab_rows: 2546
   exp_name: "F5TTS_v1_Base"
   tokenizer: "char"
-  save_per_updates: 1000
-  last_per_updates: 500
+  batch_size_per_gpu: 1200
+  max_samples: 24
+  save_per_updates: 2000
+  last_per_updates: 2000
   keep_last_n_checkpoints: 1
   runtime_tmp_dir: "/kaggle/working/super_voz_runtime_tmp"
   runtime_cache_dir: "/kaggle/working/super_voz_runtime_cache"
   disable_wandb: true
-  checkpoint_sync_interval_seconds: 300
-  checkpoint_stable_seconds: 30
+  checkpoint_sync_interval_seconds: 600
+  checkpoint_stable_seconds: 60
   local_checkpoint_keep_last: 1
   keepalive_interval_seconds: 120
 ```
@@ -145,7 +147,18 @@ Atuacao aplicada:
 - O runner agora cria `runtime_tmp_dir` e `runtime_cache_dir` em `/kaggle/working` antes do `accelerate launch`.
 - `TMPDIR`, `TEMP`, `TMP`, `WANDB_DIR`, `WANDB_CACHE_DIR`, `WANDB_CONFIG_DIR`, `HF_HOME`, `TORCH_HOME` e `XDG_CACHE_HOME` passam a apontar explicitamente para essas pastas no processo do treino F5.
 - W&B fica desabilitado por padrao no treino F5 (`WANDB_MODE=disabled`, `WANDB_DISABLED=true`) porque nao e necessario para gerar o checkpoint e apareceu nos erros de limpeza.
-- A cadencia de checkpoint F5 foi aliviada para `save_per_updates: 1000`, `last_per_updates: 500` e `keep_last_n_checkpoints: 1`, reduzindo escritas grandes e delecoes durante a mesma epoca. O custo e poder perder ate cerca de 500 updates em uma interrupcao brusca, mas diminui a chance de `SIGBUS` por I/O.
+- A cadencia de checkpoint F5 foi aliviada para `save_per_updates: 2000`, `last_per_updates: 2000` e `keep_last_n_checkpoints: 1`, reduzindo escritas grandes e delecoes durante a mesma epoca. O custo e poder perder ate cerca de 2000 updates em uma interrupcao brusca, mas diminui a chance de `SIGBUS` por I/O.
+- A carga de treino tambem foi reduzida para `batch_size_per_gpu: 1200` e `max_samples: 24`, diminuindo pressao de VRAM/RAM e reduzindo a chance de o Kaggle matar o kernel sem traceback.
+
+## Diagnostico da parada silenciosa no update 5500
+
+Em 10/06/2026 foi observado que o Kaggle parava sem alarme em `Epoch 11/20`, logo depois de `update=5500`, com losses normais no trecho final. Esse ponto coincide com a configuracao anterior `last_per_updates: 500`: o trainer F5 regrava `model_last.pt` em updates multiplos de 500. Como nao havia `Traceback` nem `CalledProcessError` visivel no trecho final, a causa mais provavel e morte externa do processo/kernel por I/O ou recurso do runtime Kaggle durante a escrita do checkpoint, nao erro de texto, vocabulario ou loss.
+
+Atuacao aplicada:
+
+- `save_per_updates` e `last_per_updates` passaram para `2000`, eliminando regravacoes intermediarias em `5500`.
+- O monitor de checkpoint passou para `checkpoint_sync_interval_seconds: 600` e `checkpoint_stable_seconds: 60`, dando mais tempo para arquivos grandes estabilizarem antes de snapshot/upload.
+- `batch_size_per_gpu` caiu de `1600` para `1200` e `max_samples` de `32` para `24`, reduzindo memoria e variabilidade do runtime.
 
 ## Entrada de audios
 

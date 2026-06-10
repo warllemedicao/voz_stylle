@@ -6,6 +6,11 @@
 - A causa operacional era concorrencia de I/O no treino F5: `model_last.pt` e regravado no mesmo caminho, e o monitor podia enviar/materializar esse checkpoint vivo por hardlink enquanto o `accelerate` ainda usava multiprocessing em `/tmp`.
 - Correcao no runner: materializacao F5 por copia real, snapshot pendente do checkpoint estavel, upload somente quando um checkpoint seguinte ja existe, remocao do snapshot enviado e retencao local do checkpoint atual.
 
+## [2026-06-10] Parada silenciosa no update 5500
+- Nova queda em `Epoch 11/20` logo apos `update=5500` nao mostrou erro de limpeza, transcricao ou dataset; o loss seguia normal.
+- Como `5500` era multiplo de `last_per_updates=500`, a suspeita principal e encerramento externo do Kaggle durante regravacao de `model_last.pt`.
+- A config Kaggle agora usa `save_per_updates=2000`, `last_per_updates=2000`, `checkpoint_sync_interval_seconds=600`, `checkpoint_stable_seconds=60`, `batch_size_per_gpu=1200` e `max_samples=24`.
+
 ## [2026-06-08] Falha obrigatoria em dependencia essencial
 - Politica nova: biblioteca usada pelo fluxo ativo nao pode falhar silenciosamente nem virar fallback permanente.
 - `scripts/run_kaggle_styletts2.py` agora aborta quando falha a instalacao de pacotes Python essenciais, pacotes de sistema de audio (`ffmpeg`, `sox`, `espeak-ng`) ou quando a verificacao pos-instalacao nao encontra os modulos esperados.

@@ -349,3 +349,9 @@ O erro `SIGBUS`/`OSError [Errno 5]` visto durante o upload de `model_last.pt` na
 O runner Kaggle agora trabalha em duas fases: cria snapshot do checkpoint estavel, espera aparecer um checkpoint seguinte, envia somente o snapshot anterior, apaga esse snapshot apos upload confirmado e mantem apenas o checkpoint atual no working. Isso preserva espaco no Kaggle e evita upload do arquivo ainda em uso pelo treino.
 
 Os checkpoints novos ficam em `voices/<inicial>_minha_voz_f5_tts_ptbr`, separados da biblioteca/base `libraries/f5_tts_ptbr_tharyck`. A inicial vem do primeiro audio `.wav` processado para facilitar localizar a pasta da voz treinada.
+
+## Historico Kaggle F5 10/06/2026
+
+Uma parada silenciosa em `Epoch 11/20` logo apos `update=5500` reforcou a suspeita de I/O do Kaggle durante checkpoint F5. O ponto `5500` era multiplo de `last_per_updates=500`, entao o runner podia estar regravando `model_last.pt` quando o runtime foi encerrado sem traceback.
+
+O perfil Kaggle foi tornado mais conservador: checkpoints a cada `2000` updates, monitor a cada `600` segundos, estabilidade minima de `60` segundos antes de snapshot/upload, `batch_size_per_gpu=1200` e `max_samples=24`. Isso reduz velocidade bruta, mas prioriza terminar o treino sem morte silenciosa do kernel.

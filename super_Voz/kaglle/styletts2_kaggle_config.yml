@@ -59,21 +59,23 @@ f5_tts_ptbr:
   prepare_as_pretrain: true
   epochs: 20
   learning_rate: 0.00001
-  batch_size_per_gpu: 1600
+  batch_size_per_gpu: 1200
   batch_size_type: "frame"
-  max_samples: 32
+  max_samples: 24
   grad_accumulation_steps: 1
   num_warmup_updates: 100
-  save_per_updates: 1000
-  last_per_updates: 500
+  # Kaggle pode matar o runtime silenciosamente durante escritas frequentes de model_last.pt.
+  # Mantemos checkpoints menos frequentes para reduzir pressao de I/O no overlay do notebook.
+  save_per_updates: 2000
+  last_per_updates: 2000
   keep_last_n_checkpoints: 1
   local_checkpoint_keep_last: 1
   mixed_precision: "fp16"
   runtime_tmp_dir: "/kaggle/working/super_voz_runtime_tmp"
   runtime_cache_dir: "/kaggle/working/super_voz_runtime_cache"
   disable_wandb: true
-  checkpoint_sync_interval_seconds: 300
-  checkpoint_stable_seconds: 30
+  checkpoint_sync_interval_seconds: 600
+  checkpoint_stable_seconds: 60
   keepalive_interval_seconds: 120
 
 # Persistencia opcional via TeraBox.
